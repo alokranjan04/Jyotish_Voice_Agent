@@ -53,9 +53,11 @@ async def home_page(request):
 async def handle_answer(request):
     try:
         post_data = await request.post()
+        # More robust Caller ID extraction
         raw_num = post_data.get("From") or post_data.get("CallerName") or "Unknown"
-        caller_id = str(raw_num).replace("+", "").strip()
-        if "sip:" in caller_id: caller_id = caller_id.split("sip:")[1].split("@")[0]
+        caller_id = str(raw_num).replace("+", "").replace("sip:", "").split("@")[0].strip()
+        if caller_id.startswith("91") and len(caller_id) > 10: caller_id = caller_id[2:] # Normalize to 10 digits
+        
         host = request.headers.get("X-Forwarded-Host") or request.host
         ws_url = f"wss://{host}/vobiz-stream?caller_id={caller_id}"
         xml_response = f'<?xml version="1.0" encoding="UTF-8"?><Response><Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">{ws_url}</Stream></Response>'
@@ -66,13 +68,18 @@ async def vobiz_handler(request):
     caller_id = request.query.get("caller_id", "Unknown")
     ws = web.WebSocketResponse()
     await ws.prepare(request)
+    print(f"--- [BRIDGE]: Connected to Caller {caller_id} ---")
     
-    state = {"last_ai_audio_time": 0, "transcript": [], "captured_email": None, "user_name": "User", "greeted": False, "dob": "", "tob": "", "pob": ""}
+    state = {"last_ai_audio_time": 0, "transcript": [], "captured_email": None, "user_name": "User", "greeted": False, "dob": "N/A", "tob": "N/A", "pob": "N/A"}
     memory = load_user_memory()
     user_data = memory.get(caller_id)
     if user_data: 
         state["captured_email"] = user_data.get("email")
         state["user_name"] = user_data.get("name")
+        state["dob"] = user_data.get("dob", "N/A")
+        state["tob"] = user_data.get("tob", "N/A")
+        state["pob"] = user_data.get("pob", "N/A")
+        print(f"--- [MEMORY]: Recognized returning user: {state['user_name']} ---")
     
     try:
         while not ws.closed:
@@ -81,9 +88,9 @@ async def vobiz_handler(request):
                     current_date_str = datetime.now().strftime("%A, %B %d, %Y")
                     memory_context = ""
                     if user_data:
-                        memory_context = f"\n\nRETURNING USER DETECTED:\nName: {user_data.get('name')}\nDOB: {user_data.get('dob')}\nTOB: {user_data.get('tob')}\nPOB: {user_data.get('pob')}\nEmail: {user_data.get('email')}"
+                        memory_context = f"\n\nRETURNING USER DETECTED:\nName: {user_data.get('name')}\nDOB: {user_data.get('dob')}\nTOB: {user_data.get('tob')}\nPOB: {user_data.get('pob')}\nEmail: {user_data.get('email')}\n\nINSTRUCTION: Greet them as a returning user and ask if they want to continue where they left off."
                     
-                    dynamic_prompt = f"{SYSTEM_PROMPT}{memory_context}\n\nIMPORTANT: Be calm and empathetic. Caller: {caller_id}. Today: {current_date_str}."
+                    dynamic_prompt = f"{SYSTEM_PROMPT}{memory_context}\n\nCaller: {caller_id}. Today: {current_date_str}."
                     
                     TOOLS = [{
                         "function_declarations": [{
@@ -92,13 +99,9 @@ async def vobiz_handler(request):
                             "parameters": {
                                 "type": "object",
                                 "properties": {
-                                    "to_email": {"type": "string"},
-                                    "name": {"type": "string"},
-                                    "dob": {"type": "string"},
-                                    "tob": {"type": "string"},
-                                    "pob": {"type": "string"},
-                                    "analysis_html": {"type": "string", "description": "Full analysis using <h2> and <p> tags."},
-                                    "birth_chart_html": {"type": "string", "description": "HTML table for the 12-house grid."}
+                                    "to_email": {"type": "string"}, "name": {"type": "string"},
+                                    "dob": {"type": "string"}, "tob": {"type": "string"}, "pob": {"type": "string"},
+                                    "analysis_html": {"type": "string"}, "birth_chart_html": {"type": "string"}
                                 },
                                 "required": ["to_email", "name", "dob", "tob", "pob", "analysis_html", "birth_chart_html"]
                             }
@@ -130,8 +133,8 @@ async def vobiz_handler(request):
                     await gemini_ws.recv()
                     
                     if not state["greeted"]:
-                        trigger_text = "Start the session." if not user_data else f"Greet the returning user {user_data.get('name')}."
-                        await gemini_ws.send(json.dumps({"realtimeInput": {"text": trigger_text}}))
+                        trigger = "Greet the returning user." if user_data else "Start the new session."
+                        await gemini_ws.send(json.dumps({"realtimeInput": {"text": trigger}}))
                         state["greeted"] = True
 
                     stream_sid = None
@@ -155,8 +158,6 @@ async def vobiz_handler(request):
                                 elif msg.type == aiohttp.WSMsgType.CLOSE: break
                         except Exception: pass
 
-                    downsample_state = None
-
                     async def ai_to_vobiz():
                         nonlocal downsample_state
                         try:
@@ -168,7 +169,9 @@ async def vobiz_handler(request):
                                             args = call["args"]
                                             state["captured_email"] = args['to_email']
                                             state["user_name"] = args['name']
-                                            success = send_astrology_report(args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args['birth_chart_html'])
+                                            state["dob"], state["tob"], state["pob"] = args['dob'], args['tob'], args['pob']
+                                            # Background task for email
+                                            asyncio.create_task(asyncio.to_thread(send_astrology_report, args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args['birth_chart_html']))
                                             await gemini_ws.send(json.dumps({"toolResponse": {"functionResponses": [{"name": "send_astrology_report", "id": call["id"], "response": {"result": "Success"}}]}}))
                                         elif call["name"] == "save_user_profile":
                                             args = call["args"]
@@ -181,7 +184,6 @@ async def vobiz_handler(request):
                                     if user_trans: 
                                         if stream_sid: await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
                                         state["transcript"].append(f"User: {user_trans}")
-                                    
                                     ai_trans = server_content.get("outputAudioTranscription", {}).get("text")
                                     if ai_trans: state["transcript"].append(f"Jyotish Mitra: {ai_trans}")
                                     if "modelTurn" in server_content:
@@ -190,10 +192,10 @@ async def vobiz_handler(request):
                                                 pcm_24k = base64.b64decode(part["inlineData"]["data"])
                                                 pcm_8k, downsample_state = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, downsample_state)
                                                 mulaw_data = audioop.lin2ulaw(pcm_8k, 2)
-                                                if stream_sid:
-                                                    await ws.send_str(json.dumps({"event": "playAudio", "streamId": stream_sid, "media": {"contentType": "audio/x-mulaw", "sampleRate": 8000, "payload": base64.b64encode(mulaw_data).decode("utf-8")}}))
+                                                if stream_sid: await ws.send_str(json.dumps({"event": "playAudio", "streamId": stream_sid, "media": {"contentType": "audio/x-mulaw", "sampleRate": 8000, "payload": base64.b64encode(mulaw_data).decode("utf-8")}}))
                         except Exception: pass
 
+                    downsample_state = None
                     async def heartbeat():
                         while not ws.closed:
                             await asyncio.sleep(30)
@@ -203,9 +205,11 @@ async def vobiz_handler(request):
             except Exception: await asyncio.sleep(1)
     except Exception: traceback.print_exc()
     finally:
-        if state["captured_email"] and len(state["transcript"]) > 5:
-            full_text = "\n".join(state["transcript"])
-            send_astrology_report(state["captured_email"], state["user_name"], "N/A", "N/A", "N/A", f"<p>{full_text}</p>", "<!-- No Chart -->")
+        # Send Transcript automatically on hangup
+        if state["captured_email"] and len(state["transcript"]) > 2:
+            print(f"--- [POST-CALL]: Sending transcript to {state['captured_email']} ---")
+            full_text = "<br>".join(state["transcript"])
+            asyncio.create_task(asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"], state["dob"], state["tob"], state["pob"], f"<h3>Full Conversation</h3><p>{full_text}</p>", "<!-- No Chart -->"))
         if not ws.closed: await ws.close()
     return ws
 
