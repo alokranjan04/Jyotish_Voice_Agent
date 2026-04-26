@@ -68,7 +68,7 @@ async def vobiz_handler(request):
             
             setup_msg = {
                 "setup": {
-                    "model": "models/gemini-1.5-flash",
+                    "model": "models/gemini-2.0-flash-exp",
                     "generationConfig": {
                         "responseModalities": ["AUDIO"],
                         "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}}
