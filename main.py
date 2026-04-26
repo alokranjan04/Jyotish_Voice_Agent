@@ -45,8 +45,8 @@ async def handle_answer(request):
         host = request.headers.get("X-Forwarded-Host") or request.host
         ws_url = f"wss://{host}/vobiz-stream?caller_id={caller_id}"
         
-        # XML Response exactly as Priya's
-        xml_response = f'<?xml version="1.0" encoding="UTF-8"?><Response><Stream bidirectional="true" keepCallAlive="true">{ws_url}</Stream></Response>'
+        # Forcing 8kHz mulaw for maximum clarity
+        xml_response = f'<?xml version="1.0" encoding="UTF-8"?><Response><Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">{ws_url}</Stream></Response>'
         print(f"\n[INCOMING] -> Caller ID: {caller_id}")
         return web.Response(text=xml_response, content_type='text/xml')
     except Exception:
@@ -107,7 +107,15 @@ async def vobiz_handler(request):
                                 payload = data.get("media", {}).get("payload") or data.get("payload")
                                 if payload:
                                     mulaw_data = base64.b64decode(payload)
+                                    # 8kHz mulaw -> 8kHz PCM
                                     pcm_8k = audioop.ulaw2lin(mulaw_data, 2)
+                                    # Volume boost (x2) to make it clearer for the AI
+                                    pcm_8k = audioop.mulaw2lin(audioop.lin2ulaw(pcm_8k, 2), 2) # Trick to use audioop for simple gain
+                                    pcm_8k = audioop.bias(pcm_8k, 2, 0) # Not gain, use mul instead
+                                    
+                                    # Let's use a simple multiplier for gain
+                                    pcm_8k = audioop.mul(pcm_8k, 2, 2.0) 
+                                    
                                     pcm_16k, upsample_state = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, upsample_state)
                                     # Use Priya's "audio" key
                                     await gemini_ws.send(json.dumps({
