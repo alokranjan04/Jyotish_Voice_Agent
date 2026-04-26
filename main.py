@@ -80,28 +80,27 @@ async def vobiz_handler(request):
             }
             await gemini_ws.send(json.dumps(setup_msg))
             await gemini_ws.recv() # setup response
-            print(f"--- [AI ENGINE]: Connected and Setup ---")
-
-            # Trigger greeting
-            await gemini_ws.send(json.dumps({"realtimeInput": {"mediaChunks": [{"mimeType": "text/plain", "data": base64.b64encode(GREETING.encode()).decode()}]}}))
-            print(f"--- [AI ENGINE]: Greeting Sent ---")
+            # Trigger greeting with silence to "wake up" the AI
+            await gemini_ws.send(json.dumps({"realtimeInput": {"mediaChunks": [{"mimeType": "audio/pcm;rate=16000", "data": base64.b64encode(b'\x00' * 3200).decode()}]}}))
+            print(f"--- [AI ENGINE]: Wake-up Pulse Sent ---")
 
             async def vobiz_to_ai():
-                """Receive mulaw from Vobiz -> Send PCM to Gemini."""
+                """Receive mulaw from Vobiz -> Send 16kHz PCM to Gemini."""
                 try:
                     async for msg in ws:
                         if msg.type == web.WSMsgType.BINARY:
-                            # 8kHz mulaw -> 24kHz pcm
+                            # 8kHz mulaw -> 16kHz pcm
                             pcm_8k = audioop.ulaw2lin(msg.data, 2)
-                            pcm_24k, _ = audioop.ratecv(pcm_8k, 2, 1, 8000, 24000, None)
+                            pcm_16k, _ = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, None)
                             await gemini_ws.send(json.dumps({
-                                "realtimeInput": {"mediaChunks": [{"mimeType": "audio/pcm;rate=24000", "data": base64.b64encode(pcm_24k).decode()}]}
+                                "realtimeInput": {"mediaChunks": [{"mimeType": "audio/pcm;rate=16000", "data": base64.b64encode(pcm_16k).decode()}]}
                             }))
                 except Exception as e:
                     print(f"Error in vobiz_to_ai: {e}")
 
             async def ai_to_vobiz():
-                """Receive PCM from Gemini -> Send mulaw to Vobiz."""
+                """Receive 16kHz PCM from Gemini -> Send mulaw to Vobiz."""
+                audio_packet_count = 0
                 try:
                     async for message in gemini_ws:
                         resp = json.loads(message)
@@ -110,12 +109,18 @@ async def vobiz_handler(request):
                             parts = server_content["modelTurn"].get("parts", [])
                             for part in parts:
                                 if "inlineData" in part:
-                                    # 24kHz pcm -> 8kHz mulaw
-                                    pcm_24k = base64.b64decode(part["inlineData"]["data"])
-                                    pcm_8k, _ = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, None)
+                                    audio_packet_count += 1
+                                    if audio_packet_count % 20 == 0:
+                                        print(f"--- [AI ENGINE]: Sending Audio Packet {audio_packet_count} to Vobiz ---")
+                                    
+                                    # 16kHz pcm -> 8kHz mulaw
+                                    pcm_16k = base64.b64decode(part["inlineData"]["data"])
+                                    pcm_8k, _ = audioop.ratecv(pcm_16k, 2, 1, 16000, 8000, None)
                                     ulaw_data = audioop.lin2ulaw(pcm_8k, 2)
                                     await ws.send_bytes(ulaw_data)
                                     state["last_ai_audio_time"] = time.time()
+                except Exception as e:
+                    print(f"Error in ai_to_vobiz: {e}")
                 except Exception as e:
                     print(f"Error in ai_to_vobiz: {e}")
 
