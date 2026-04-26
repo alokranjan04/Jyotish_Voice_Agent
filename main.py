@@ -45,6 +45,7 @@ async def handle_answer(request):
         host = request.headers.get("X-Forwarded-Host") or request.host
         ws_url = f"wss://{host}/vobiz-stream?caller_id={caller_id}"
         
+        # Using raw binary stream for maximum performance
         xml_response = f'<?xml version="1.0" encoding="UTF-8"?><Response><Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">{ws_url}</Stream></Response>'
         print(f"\n[INCOMING] -> Caller ID: {caller_id}")
         return web.Response(text=xml_response, content_type='text/xml')
@@ -55,19 +56,16 @@ async def vobiz_handler(request):
     caller_id = request.query.get("caller_id", "Unknown")
     ws = web.WebSocketResponse(protocols=['audio.drachtio.org'])
     await ws.prepare(request)
-    print(f"--- [BRIDGE]: Ready for Caller {caller_id} ---")
+    print(f"--- [BRIDGE]: Connected to Caller {caller_id} ---")
     
-    start_time = time.time()
     state = {"last_ai_audio_time": 0}
     
     try:
-        print(f"--- [AI ENGINE]: Connecting to Gemini... ---")
         async with websockets.connect(GEMINI_URL) as gemini_ws:
-            # Setup
+            # Setup Gemini
             current_date_str = datetime.now().strftime("%A, %B %d, %Y")
             dynamic_prompt = f"{SYSTEM_PROMPT}\n\nIMPORTANT: Be calm and empathetic. Caller number: {caller_id}. Today is: {current_date_str}."
             
-            # Use 1.5 Flash for maximum stability first
             setup_msg = {
                 "setup": {
                     "model": "models/gemini-1.5-flash",
@@ -80,76 +78,52 @@ async def vobiz_handler(request):
                     "outputAudioTranscription": {}
                 }
             }
-            print(f"--- [AI ENGINE]: Sending Setup... ---")
             await gemini_ws.send(json.dumps(setup_msg))
-            setup_resp = await gemini_ws.recv()
-            print(f"--- [AI ENGINE]: Setup Response: {setup_resp[:200]} ---")
+            await gemini_ws.recv() # setup response
+            print(f"--- [AI ENGINE]: Connected and Setup ---")
 
             # Trigger greeting
-            await gemini_ws.send(json.dumps({"realtimeInput": {"text": "Hello"}}))
-            
-            stream_sid = None
-            upsample_state = None 
+            await gemini_ws.send(json.dumps({"realtimeInput": {"mediaChunks": [{"mimeType": "text/plain", "data": base64.b64encode(GREETING.encode()).decode()}]}}))
+            print(f"--- [AI ENGINE]: Greeting Sent ---")
 
-            async def from_vobiz():
-                nonlocal stream_sid, upsample_state
+            async def vobiz_to_ai():
+                """Receive mulaw from Vobiz -> Send PCM to Gemini."""
                 try:
                     async for msg in ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            data = json.loads(msg.data)
-                            current_id = data.get("streamId") or data.get("streamSid") or (data.get("start", {}).get("streamId") if data.get("event") == "start" else None)
-                            if current_id and not stream_sid: stream_sid = current_id
-
-                            if data.get("event") == "media" and stream_sid:
-                                if time.time() - state["last_ai_audio_time"] < 1.0: continue
-                                payload = data.get("media", {}).get("payload") or data.get("payload")
-                                if payload:
-                                    mulaw_data = base64.b64decode(payload)
-                                    pcm_8k = audioop.ulaw2lin(mulaw_data, 2)
-                                    pcm_16k, upsample_state = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, upsample_state)
-                                    await gemini_ws.send(json.dumps({"realtimeInput": {"audio": {"data": base64.b64encode(pcm_16k).decode("utf-8"), "mimeType": "audio/pcm;rate=16000"}}}))
-                        elif msg.type == aiohttp.WSMsgType.CLOSE: break
+                        if msg.type == web.WSMsgType.BINARY:
+                            # 8kHz mulaw -> 24kHz pcm
+                            pcm_8k = audioop.ulaw2lin(msg.data, 2)
+                            pcm_24k, _ = audioop.ratecv(pcm_8k, 2, 1, 8000, 24000, None)
+                            await gemini_ws.send(json.dumps({
+                                "realtimeInput": {"mediaChunks": [{"mimeType": "audio/pcm;rate=24000", "data": base64.b64encode(pcm_24k).decode()}]}
+                            }))
                 except Exception as e:
-                    print(f"[ERROR] from_vobiz: {e}")
+                    print(f"Error in vobiz_to_ai: {e}")
 
-            downsample_state = None 
-
-            async def from_gemini():
-                nonlocal downsample_state
+            async def ai_to_vobiz():
+                """Receive PCM from Gemini -> Send mulaw to Vobiz."""
                 try:
                     async for message in gemini_ws:
                         resp = json.loads(message)
-                        
-                        # Transcriptions
-                        transcription = resp.get("serverContent", {}).get("inputAudioTranscription", {}).get("text")
-                        if transcription: print(f"\n[USER]: {transcription}")
-                        
-                        out_transcription = resp.get("serverContent", {}).get("outputAudioTranscription", {}).get("text")
-                        if out_transcription: print(f"\n[JYOTISH]: {out_transcription}")
-
-                        # Audio
                         server_content = resp.get("serverContent")
-                        if server_content:
-                            model_turn = server_content.get("modelTurn")
-                            if model_turn:
-                                for part in model_turn.get("parts", []):
-                                    if "inlineData" in part:
-                                        state["last_ai_audio_time"] = time.time()
-                                        pcm_24k = base64.b64decode(part["inlineData"]["data"])
-                                        pcm_8k, downsample_state = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, downsample_state)
-                                        mulaw_data = audioop.lin2ulaw(pcm_8k, 2)
-                                        if stream_sid:
-                                            await ws.send_str(json.dumps({
-                                                "event": "playAudio", "streamId": stream_sid, 
-                                                "media": {"contentType": "audio/x-mulaw", "sampleRate": 8000, "payload": base64.b64encode(mulaw_data).decode("utf-8")}
-                                            }))
+                        if server_content and "modelTurn" in server_content:
+                            parts = server_content["modelTurn"].get("parts", [])
+                            for part in parts:
+                                if "inlineData" in part:
+                                    # 24kHz pcm -> 8kHz mulaw
+                                    pcm_24k = base64.b64decode(part["inlineData"]["data"])
+                                    pcm_8k, _ = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, None)
+                                    ulaw_data = audioop.lin2ulaw(pcm_8k, 2)
+                                    await ws.send_bytes(ulaw_data)
+                                    state["last_ai_audio_time"] = time.time()
                 except Exception as e:
-                    print(f"[ERROR] from_gemini: {e}")
+                    print(f"Error in ai_to_vobiz: {e}")
 
-            await asyncio.wait([asyncio.create_task(from_vobiz()), asyncio.create_task(from_gemini())], return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.gather(vobiz_to_ai(), ai_to_vobiz())
 
     except Exception as e:
-        print(f"[ERROR] vobiz_handler: {e}")
+        print(f"--- [CRITICAL ERROR]: {e} ---")
+        traceback.print_exc()
     finally:
         if not ws.closed: await ws.close()
     return ws
