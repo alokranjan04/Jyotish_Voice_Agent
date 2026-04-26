@@ -13,5 +13,6 @@ COPY main.py app_config.json ./
 
 EXPOSE 8080
 ENV PORT=8080
+ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "main.py"]

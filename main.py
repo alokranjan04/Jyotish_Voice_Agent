@@ -55,20 +55,22 @@ async def vobiz_handler(request):
     caller_id = request.query.get("caller_id", "Unknown")
     ws = web.WebSocketResponse(protocols=['audio.drachtio.org'])
     await ws.prepare(request)
-    print(f"--- [BRIDGE]: Ready ---")
+    print(f"--- [BRIDGE]: Ready for Caller {caller_id} ---")
     
     start_time = time.time()
     state = {"last_ai_audio_time": 0}
     
     try:
+        print(f"--- [AI ENGINE]: Connecting to Gemini... ---")
         async with websockets.connect(GEMINI_URL) as gemini_ws:
             # Setup
             current_date_str = datetime.now().strftime("%A, %B %d, %Y")
             dynamic_prompt = f"{SYSTEM_PROMPT}\n\nIMPORTANT: Be calm and empathetic. Caller number: {caller_id}. Today is: {current_date_str}."
             
+            # Use 1.5 Flash for maximum stability first
             setup_msg = {
                 "setup": {
-                    "model": "models/gemini-2.0-flash-exp",
+                    "model": "models/gemini-1.5-flash",
                     "generationConfig": {
                         "responseModalities": ["AUDIO"],
                         "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}}
@@ -78,9 +80,10 @@ async def vobiz_handler(request):
                     "outputAudioTranscription": {}
                 }
             }
+            print(f"--- [AI ENGINE]: Sending Setup... ---")
             await gemini_ws.send(json.dumps(setup_msg))
-            await gemini_ws.recv() # setup response
-            print(f"--- [AI ENGINE]: Connected ---")
+            setup_resp = await gemini_ws.recv()
+            print(f"--- [AI ENGINE]: Setup Response: {setup_resp[:200]} ---")
 
             # Trigger greeting
             await gemini_ws.send(json.dumps({"realtimeInput": {"text": "Hello"}}))
