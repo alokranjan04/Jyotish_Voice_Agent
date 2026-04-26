@@ -107,17 +107,9 @@ async def vobiz_handler(request):
                                 payload = data.get("media", {}).get("payload") or data.get("payload")
                                 if payload:
                                     mulaw_data = base64.b64decode(payload)
-                                    # 8kHz mulaw -> 8kHz PCM
                                     pcm_8k = audioop.ulaw2lin(mulaw_data, 2)
-                                    # Volume boost (x2) to make it clearer for the AI
-                                    pcm_8k = audioop.mulaw2lin(audioop.lin2ulaw(pcm_8k, 2), 2) # Trick to use audioop for simple gain
-                                    pcm_8k = audioop.bias(pcm_8k, 2, 0) # Not gain, use mul instead
-                                    
-                                    # Let's use a simple multiplier for gain
-                                    pcm_8k = audioop.mul(pcm_8k, 2, 2.0) 
-                                    
+                                    # Standard resampling without extra gain tricks
                                     pcm_16k, upsample_state = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, upsample_state)
-                                    # Use Priya's "audio" key
                                     await gemini_ws.send(json.dumps({
                                         "realtimeInput": {
                                             "audio": {
