@@ -66,12 +66,13 @@ async def vobiz_handler(request):
     caller_id = request.query.get("caller_id", "Unknown")
     ws = web.WebSocketResponse()
     await ws.prepare(request)
-    print(f"--- [BRIDGE]: Connected to Caller {caller_id} ---")
     
-    state = {"last_ai_audio_time": 0, "transcript": [], "captured_email": None, "user_name": "User", "greeted": False}
+    state = {"last_ai_audio_time": 0, "transcript": [], "captured_email": None, "user_name": "User", "greeted": False, "dob": "", "tob": "", "pob": ""}
     memory = load_user_memory()
     user_data = memory.get(caller_id)
-    if user_data: state["captured_email"] = user_data.get("email")
+    if user_data: 
+        state["captured_email"] = user_data.get("email")
+        state["user_name"] = user_data.get("name")
     
     try:
         while not ws.closed:
@@ -80,23 +81,26 @@ async def vobiz_handler(request):
                     current_date_str = datetime.now().strftime("%A, %B %d, %Y")
                     memory_context = ""
                     if user_data:
-                        memory_context = f"\n\nRETURNING USER DETECTED:\nName: {user_data.get('name')}\nBirth Details: {user_data.get('birth_details')}\nEmail: {user_data.get('email')}"
+                        memory_context = f"\n\nRETURNING USER DETECTED:\nName: {user_data.get('name')}\nDOB: {user_data.get('dob')}\nTOB: {user_data.get('tob')}\nPOB: {user_data.get('pob')}\nEmail: {user_data.get('email')}"
                     
                     dynamic_prompt = f"{SYSTEM_PROMPT}{memory_context}\n\nIMPORTANT: Be calm and empathetic. Caller: {caller_id}. Today: {current_date_str}."
                     
                     TOOLS = [{
                         "function_declarations": [{
                             "name": "send_astrology_report",
-                            "description": "Sends the Kundali report email immediately.",
+                            "description": "Sends the premium HTML report.",
                             "parameters": {
                                 "type": "object",
                                 "properties": {
                                     "to_email": {"type": "string"},
                                     "name": {"type": "string"},
-                                    "birth_details": {"type": "string"},
-                                    "analysis": {"type": "string"}
+                                    "dob": {"type": "string"},
+                                    "tob": {"type": "string"},
+                                    "pob": {"type": "string"},
+                                    "analysis_html": {"type": "string", "description": "Full analysis using <h2> and <p> tags."},
+                                    "birth_chart_html": {"type": "string", "description": "HTML table for the 12-house grid."}
                                 },
-                                "required": ["to_email", "name", "birth_details", "analysis"]
+                                "required": ["to_email", "name", "dob", "tob", "pob", "analysis_html", "birth_chart_html"]
                             }
                         },
                         {
@@ -104,8 +108,8 @@ async def vobiz_handler(request):
                             "description": "Saves user profile.",
                             "parameters": {
                                 "type": "object",
-                                "properties": {"name": {"type": "string"}, "birth_details": {"type": "string"}, "email": {"type": "string"}},
-                                "required": ["name", "birth_details", "email"]
+                                "properties": {"name": {"type": "string"}, "dob": {"type": "string"}, "tob": {"type": "string"}, "pob": {"type": "string"}, "email": {"type": "string"}},
+                                "required": ["name", "dob", "tob", "pob", "email"]
                             }
                         }]
                     }]
@@ -164,7 +168,7 @@ async def vobiz_handler(request):
                                             args = call["args"]
                                             state["captured_email"] = args['to_email']
                                             state["user_name"] = args['name']
-                                            success = send_astrology_report(args['to_email'], args['name'], args['birth_details'], args['analysis'])
+                                            success = send_astrology_report(args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args['birth_chart_html'])
                                             await gemini_ws.send(json.dumps({"toolResponse": {"functionResponses": [{"name": "send_astrology_report", "id": call["id"], "response": {"result": "Success"}}]}}))
                                         elif call["name"] == "save_user_profile":
                                             args = call["args"]
@@ -174,7 +178,10 @@ async def vobiz_handler(request):
                                 server_content = resp.get("serverContent")
                                 if server_content:
                                     user_trans = server_content.get("inputAudioTranscription", {}).get("text")
-                                    if user_trans: state["transcript"].append(f"User: {user_trans}")
+                                    if user_trans: 
+                                        if stream_sid: await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
+                                        state["transcript"].append(f"User: {user_trans}")
+                                    
                                     ai_trans = server_content.get("outputAudioTranscription", {}).get("text")
                                     if ai_trans: state["transcript"].append(f"Jyotish Mitra: {ai_trans}")
                                     if "modelTurn" in server_content:
@@ -193,14 +200,12 @@ async def vobiz_handler(request):
                             try: await gemini_ws.ping()
                             except: break
                     await asyncio.gather(vobiz_to_ai(), ai_to_vobiz(), heartbeat())
-            except Exception as e:
-                await asyncio.sleep(1)
-                if ws.closed: break
+            except Exception: await asyncio.sleep(1)
     except Exception: traceback.print_exc()
     finally:
         if state["captured_email"] and len(state["transcript"]) > 5:
             full_text = "\n".join(state["transcript"])
-            send_astrology_report(state["captured_email"], state["user_name"], "Full Conversation Transcript", "Dhanyawad! Ye hai aapki poori baat-cheet ka record.", full_text)
+            send_astrology_report(state["captured_email"], state["user_name"], "N/A", "N/A", "N/A", f"<p>{full_text}</p>", "<!-- No Chart -->")
         if not ws.closed: await ws.close()
     return ws
 
