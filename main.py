@@ -53,11 +53,9 @@ async def home_page(request):
 async def handle_answer(request):
     try:
         post_data = await request.post()
-        # More robust Caller ID extraction
         raw_num = post_data.get("From") or post_data.get("CallerName") or "Unknown"
         caller_id = str(raw_num).replace("+", "").replace("sip:", "").split("@")[0].strip()
-        if caller_id.startswith("91") and len(caller_id) > 10: caller_id = caller_id[2:] # Normalize to 10 digits
-        
+        if caller_id.startswith("91") and len(caller_id) > 10: caller_id = caller_id[2:]
         host = request.headers.get("X-Forwarded-Host") or request.host
         ws_url = f"wss://{host}/vobiz-stream?caller_id={caller_id}"
         xml_response = f'<?xml version="1.0" encoding="UTF-8"?><Response><Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">{ws_url}</Stream></Response>'
@@ -79,7 +77,6 @@ async def vobiz_handler(request):
         state["dob"] = user_data.get("dob", "N/A")
         state["tob"] = user_data.get("tob", "N/A")
         state["pob"] = user_data.get("pob", "N/A")
-        print(f"--- [MEMORY]: Recognized returning user: {state['user_name']} ---")
     
     try:
         while not ws.closed:
@@ -88,7 +85,7 @@ async def vobiz_handler(request):
                     current_date_str = datetime.now().strftime("%A, %B %d, %Y")
                     memory_context = ""
                     if user_data:
-                        memory_context = f"\n\nRETURNING USER DETECTED:\nName: {user_data.get('name')}\nDOB: {user_data.get('dob')}\nTOB: {user_data.get('tob')}\nPOB: {user_data.get('pob')}\nEmail: {user_data.get('email')}\n\nINSTRUCTION: Greet them as a returning user and ask if they want to continue where they left off."
+                        memory_context = f"\n\nRETURNING USER DETECTED:\nName: {user_data.get('name')}\nDOB: {user_data.get('dob')}\nTOB: {user_data.get('tob')}\nPOB: {user_data.get('pob')}\nEmail: {user_data.get('email')}"
                     
                     dynamic_prompt = f"{SYSTEM_PROMPT}{memory_context}\n\nCaller: {caller_id}. Today: {current_date_str}."
                     
@@ -170,7 +167,6 @@ async def vobiz_handler(request):
                                             state["captured_email"] = args['to_email']
                                             state["user_name"] = args['name']
                                             state["dob"], state["tob"], state["pob"] = args['dob'], args['tob'], args['pob']
-                                            # Background task for email
                                             asyncio.create_task(asyncio.to_thread(send_astrology_report, args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args['birth_chart_html']))
                                             await gemini_ws.send(json.dumps({"toolResponse": {"functionResponses": [{"name": "send_astrology_report", "id": call["id"], "response": {"result": "Success"}}]}}))
                                         elif call["name"] == "save_user_profile":
@@ -205,11 +201,12 @@ async def vobiz_handler(request):
             except Exception: await asyncio.sleep(1)
     except Exception: traceback.print_exc()
     finally:
-        # Send Transcript automatically on hangup
+        # ENSURE Transcript is sent before closing
         if state["captured_email"] and len(state["transcript"]) > 2:
             print(f"--- [POST-CALL]: Sending transcript to {state['captured_email']} ---")
             full_text = "<br>".join(state["transcript"])
-            asyncio.create_task(asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"], state["dob"], state["tob"], state["pob"], f"<h3>Full Conversation</h3><p>{full_text}</p>", "<!-- No Chart -->"))
+            # USE AWAIT here to ensure it finishes before the coroutine exits
+            await asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"], state["dob"], state["tob"], state["pob"], f"<h3>Full Conversation Transcript</h3><p>{full_text}</p>", "<!-- No Chart -->")
         if not ws.closed: await ws.close()
     return ws
 
