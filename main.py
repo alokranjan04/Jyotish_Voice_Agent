@@ -216,19 +216,33 @@ async def vobiz_handler(request):
     return ws
 
 async def main():
+    print(f"--- [STARTUP]: Initializing Jyotish Mitra Voice Agent ---")
     app = web.Application()
     app.router.add_get('/', home_page)
     app.router.add_post('/answer', handle_answer)
     app.router.add_get('/vobiz-stream', vobiz_handler)
+    
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.getenv("PORT", "5051"))
+    
+    # Cloud Run uses PORT 8080 by default
+    port = int(os.getenv("PORT", "8080"))
+    print(f"--- [STARTUP]: Starting server on port {port} ---")
+    
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
+    
     print("╔══════════════════════════════════════════════════════════╗")
     print(f"║  JYOTISH VOICE AGENT ONLINE (PORT {port})                  ║")
     print("╚══════════════════════════════════════════════════════════╝")
-    await asyncio.Future()
+    
+    # Keep the event loop running
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print(f"--- [CRITICAL STARTUP ERROR]: {e} ---")
+        traceback.print_exc()
