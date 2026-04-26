@@ -103,7 +103,8 @@ async def vobiz_handler(request):
                                 print(f"--- [VOBIZ]: Stream SID identified: {stream_sid} ---")
 
                             if data.get("event") == "media" and stream_sid:
-                                if time.time() - state["last_ai_audio_time"] < 1.0: continue
+                                # Reduced interruption delay to 0.5s for better responsiveness
+                                if time.time() - state["last_ai_audio_time"] < 0.5: continue
                                 payload = data.get("media", {}).get("payload") or data.get("payload")
                                 if payload:
                                     mulaw_data = base64.b64decode(payload)
@@ -130,34 +131,39 @@ async def vobiz_handler(request):
                     async for message in gemini_ws:
                         resp = json.loads(message)
                         
-                        # Handle transcriptions for logging
-                        trans = resp.get("serverContent", {}).get("inputAudioTranscription", {}).get("text")
-                        if trans: print(f"[USER]: {trans}")
-                        
+                        # Visible Transcript logging
                         server_content = resp.get("serverContent")
-                        if server_content and "modelTurn" in server_content:
-                            parts = server_content["modelTurn"].get("parts", [])
-                            for part in parts:
-                                if "inlineData" in part:
-                                    audio_packet_count += 1
-                                    if audio_packet_count % 20 == 0:
-                                        print(f"--- [AI ENGINE]: Sending Audio Packet {audio_packet_count} to Vobiz ---")
-                                    
-                                    state["last_ai_audio_time"] = time.time()
-                                    pcm_16k = base64.b64decode(part["inlineData"]["data"])
-                                    pcm_8k, downsample_state = audioop.ratecv(pcm_16k, 2, 1, 16000, 8000, downsample_state)
-                                    mulaw_data = audioop.lin2ulaw(pcm_8k, 2)
-                                    
-                                    if stream_sid:
-                                        await ws.send_str(json.dumps({
-                                            "event": "playAudio",
-                                            "streamId": stream_sid,
-                                            "media": {
-                                                "contentType": "audio/x-mulaw",
-                                                "sampleRate": 8000,
-                                                "payload": base64.b64encode(mulaw_data).decode("utf-8")
-                                            }
-                                        }))
+                        if server_content:
+                            # User speech transcript
+                            user_trans = server_content.get("inputAudioTranscription", {}).get("text")
+                            if user_trans: print(f"\n>>> [USER]: {user_trans}")
+                            
+                            # AI speech transcript
+                            ai_trans = server_content.get("outputAudioTranscription", {}).get("text")
+                            if ai_trans: print(f"\n>>> [AI]: {ai_trans}")
+
+                            if "modelTurn" in server_content:
+                                parts = server_content["modelTurn"].get("parts", [])
+                                for part in parts:
+                                    if "inlineData" in part:
+                                        audio_packet_count += 1
+                                        state["last_ai_audio_time"] = time.time()
+                                        
+                                        # Gemini default is 24kHz. Treating as 16kHz caused the 'man voice'
+                                        pcm_24k = base64.b64decode(part["inlineData"]["data"])
+                                        pcm_8k, downsample_state = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, downsample_state)
+                                        ulaw_data = audioop.lin2ulaw(pcm_8k, 2)
+                                        
+                                        if stream_sid:
+                                            await ws.send_str(json.dumps({
+                                                "event": "playAudio",
+                                                "streamId": stream_sid,
+                                                "media": {
+                                                    "contentType": "audio/x-mulaw",
+                                                    "sampleRate": 8000,
+                                                    "payload": base64.b64encode(ulaw_data).decode("utf-8")
+                                                }
+                                            }))
                 except Exception as e:
                     print(f"Error in ai_to_vobiz: {e}")
 
