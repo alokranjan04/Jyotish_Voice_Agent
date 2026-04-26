@@ -13,6 +13,7 @@ from aiohttp import web
 import aiohttp
 from datetime import datetime
 from dotenv import load_dotenv
+from email_utils import send_astrology_report
 
 load_dotenv()
 
@@ -66,6 +67,24 @@ async def vobiz_handler(request):
             current_date_str = datetime.now().strftime("%A, %B %d, %Y")
             dynamic_prompt = f"{SYSTEM_PROMPT}\n\nIMPORTANT: Be calm and empathetic. Caller number: {caller_id}. Today is: {current_date_str}."
             
+            # Tool Definition
+            TOOLS = [{
+                "function_declarations": [{
+                    "name": "send_astrology_report",
+                    "description": "Sends an astrology report email to the user.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "to_email": {"type": "string", "description": "User's email address"},
+                            "name": {"type": "string", "description": "User's name"},
+                            "birth_details": {"type": "string", "description": "Full birth details (Date, Time, Place)"},
+                            "analysis": {"type": "string", "description": "A summary of the astrological analysis discussed."}
+                        },
+                        "required": ["to_email", "name", "birth_details", "analysis"]
+                    }
+                }]
+            }]
+
             setup_msg = {
                 "setup": {
                     "model": "models/gemini-3.1-flash-live-preview",
@@ -74,6 +93,7 @@ async def vobiz_handler(request):
                         "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}}
                     },
                     "systemInstruction": {"parts": [{"text": dynamic_prompt}]},
+                    "tools": TOOLS,
                     "inputAudioTranscription": {},
                     "outputAudioTranscription": {}
                 }
@@ -130,6 +150,26 @@ async def vobiz_handler(request):
                     async for message in gemini_ws:
                         resp = json.loads(message)
                         
+                        # Handle Tool Calls
+                        if "toolCall" in resp:
+                            for call in resp["toolCall"]["functionCalls"]:
+                                if call["name"] == "send_astrology_report":
+                                    args = call["args"]
+                                    print(f"--- [TOOL CALL]: Sending Email to {args['to_email']} ---")
+                                    success = send_astrology_report(args['to_email'], args['name'], args['birth_details'], args['analysis'])
+                                    
+                                    # Send tool response back to Gemini
+                                    tool_resp = {
+                                        "toolResponse": {
+                                            "functionResponses": [{
+                                                "name": "send_astrology_report",
+                                                "id": call["id"],
+                                                "response": {"result": "Email sent successfully" if success else "Failed to send email"}
+                                            }]
+                                        }
+                                    }
+                                    await gemini_ws.send(json.dumps(tool_resp))
+
                         # Visible Transcript logging
                         server_content = resp.get("serverContent")
                         if server_content:
