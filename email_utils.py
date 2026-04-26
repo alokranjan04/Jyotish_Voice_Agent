@@ -3,8 +3,8 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-def send_astrology_report(to_email, name, birth_details, analysis):
-    """Sends a beautiful HTML astrology report via Gmail."""
+def send_astrology_report(to_email, name, birth_details, analysis, transcript=""):
+    """Sends a beautiful HTML astrology report with a conversation transcript."""
     gmail_user = os.getenv("GMAIL_USER")
     gmail_password = os.getenv("GMAIL_APP_PASSWORD")
     
@@ -17,8 +17,9 @@ def send_astrology_report(to_email, name, birth_details, analysis):
     msg['To'] = to_email
     msg['Subject'] = f"Aapki Kundali Analysis - {name}"
 
-    # Prepare analysis text for HTML (replace newlines with <br>)
+    # Prepare texts for HTML
     formatted_analysis = analysis.replace('\n', '<br>')
+    formatted_transcript = transcript.replace('\n', '<br>')
 
     # Beautiful HTML Template
     html_content = f"""
@@ -30,22 +31,24 @@ def send_astrology_report(to_email, name, birth_details, analysis):
                 <p style="color: #888; font-size: 14px; margin-top: 5px;">वैदिक ज्योतिष — रिपोर्ट</p>
             </div>
             
-            <div style="margin-bottom: 30px;">
+            <div style="margin-bottom: 20px;">
                 <h2 style="color: #d4af37; font-size: 18px; border-left: 4px solid #d4af37; padding-left: 10px;">| जन्म विवरण</h2>
-                <table style="width: 100%; color: #ccc; font-size: 15px; border-collapse: collapse;">
-                    <tr><td style="padding: 8px 0; width: 40%;"><strong>नाम</strong></td><td style="color: #fff;">{name}</td></tr>
-                    <tr><td style="padding: 8px 0;"><strong>विवरण</strong></td><td style="color: #fff;">{birth_details}</td></tr>
+                <table style="width: 100%; color: #ccc; font-size: 14px; border-collapse: collapse;">
+                    <tr><td style="padding: 5px 0; width: 30%;"><strong>नाम</strong></td><td style="color: #fff;">{name}</td></tr>
+                    <tr><td style="padding: 5px 0;"><strong>विवरण</strong></td><td style="color: #fff;">{birth_details}</td></tr>
                 </table>
             </div>
 
-            <div style="margin-bottom: 30px;">
+            <div style="margin-bottom: 20px;">
                 <h2 style="color: #d4af37; font-size: 18px; border-left: 4px solid #d4af37; padding-left: 10px;">| कुंडली विश्लेषण</h2>
-                <div style="color: #ddd; line-height: 1.6; font-size: 15px; background: #1a1a1a; padding: 15px; border-radius: 5px;">
+                <div style="color: #ddd; line-height: 1.6; font-size: 14px; background: #1a1a1a; padding: 15px; border-radius: 5px;">
                     {formatted_analysis}
                 </div>
             </div>
 
-            <div style="text-align: center; color: #888; font-size: 12px; border-top: 1px solid #333; padding-top: 20px;">
+            {"<div style='margin-bottom: 20px;'><h2 style='color: #d4af37; font-size: 18px; border-left: 4px solid #d4af37; padding-left: 10px;'>| बातचीत का सारांश</h2><div style='color: #888; font-size: 13px; line-height: 1.4; font-style: italic;'>" + formatted_transcript + "</div></div>" if transcript else ""}
+
+            <div style="text-align: center; color: #888; font-size: 11px; border-top: 1px solid #333; padding-top: 20px;">
                 <p>Aapki life ki raah dikhaane mein humein khushi hai.</p>
                 <p>&copy; 2026 Jyotish Mitra | Vedic Astrology Insights</p>
             </div>
@@ -61,7 +64,7 @@ def send_astrology_report(to_email, name, birth_details, analysis):
         server.login(gmail_user, gmail_password)
         server.send_message(msg)
         server.quit()
-        print(f"[SUCCESS] Beautiful HTML Email sent to {to_email}")
+        print(f"[SUCCESS] Transcript Email sent to {to_email}")
         return True
     except Exception as e:
         print(f"[ERROR] Failed to send email: {e}")
