@@ -8,7 +8,7 @@ env:
   PROJECT_ID: testcnx-169610
   SERVICE_NAME: jyotish-voice-agent
   REGION: us-central1
-  IMAGE_NAME: gcr.io/testcnx-169610/jyotish-voice-agent
+  IMAGE_NAME: us-central1-docker.pkg.dev/testcnx-169610/jyotish-repo/jyotish-voice-agent
 
 jobs:
   deploy:
