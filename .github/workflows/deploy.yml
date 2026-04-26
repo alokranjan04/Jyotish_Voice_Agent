@@ -40,4 +40,5 @@ jobs:
           --region $REGION \
           --platform managed \
           --allow-unauthenticated \
-          --set-env-vars="GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GMAIL_USER=${{ secrets.GMAIL_USER }},GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }},VOBIZ_NUMBER=${{ secrets.VOBIZ_NUMBER }}"
+          --set-env-vars="GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GMAIL_USER=${{ secrets.GMAIL_USER }},GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }},VOBIZ_NUMBER=${{ secrets.VOBIZ_NUMBER }}" \
+          --timeout=3600
