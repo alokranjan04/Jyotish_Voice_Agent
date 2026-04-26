@@ -17,6 +17,9 @@ def send_astrology_report(to_email, name, birth_details, analysis):
     msg['To'] = to_email
     msg['Subject'] = f"Aapki Kundali Analysis - {name}"
 
+    # Prepare analysis text for HTML (replace newlines with <br>)
+    formatted_analysis = analysis.replace('\n', '<br>')
+
     # Beautiful HTML Template
     html_content = f"""
     <html>
@@ -38,7 +41,7 @@ def send_astrology_report(to_email, name, birth_details, analysis):
             <div style="margin-bottom: 30px;">
                 <h2 style="color: #d4af37; font-size: 18px; border-left: 4px solid #d4af37; padding-left: 10px;">| कुंडली विश्लेषण</h2>
                 <div style="color: #ddd; line-height: 1.6; font-size: 15px; background: #1a1a1a; padding: 15px; border-radius: 5px;">
-                    {analysis.replace('\n', '<br>')}
+                    {formatted_analysis}
                 </div>
             </div>
 
