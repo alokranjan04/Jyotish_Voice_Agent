@@ -79,11 +79,12 @@ async def vobiz_handler(request):
                 }
             }
             await gemini_ws.send(json.dumps(setup_msg))
-            setup_resp = await gemini_ws.recv()
+            await gemini_ws.recv() # setup response
             print(f"--- [AI ENGINE]: Setup success ---")
 
-            # Trigger greeting as Priya does
-            await gemini_ws.send(json.dumps({"realtimeInput": {"text": "Hello"}}))
+            # Step 2: Trigger greeting as a USER turn to avoid "First content role" error
+            # We send a text message which Gemini treats as the first User input
+            await gemini_ws.send(json.dumps({"realtimeInput": {"text": "Hello. Start the session with your official greeting."}}))
             print(f"--- [AI ENGINE]: Greeting Trigger Sent ---")
 
             stream_sid = None
