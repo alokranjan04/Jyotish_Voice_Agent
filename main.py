@@ -103,8 +103,6 @@ async def vobiz_handler(request):
                                 print(f"--- [VOBIZ]: Stream SID identified: {stream_sid} ---")
 
                             if data.get("event") == "media" and stream_sid:
-                                # Reduced interruption delay to 0.5s for better responsiveness
-                                if time.time() - state["last_ai_audio_time"] < 0.5: continue
                                 payload = data.get("media", {}).get("payload") or data.get("payload")
                                 if payload:
                                     mulaw_data = base64.b64decode(payload)
