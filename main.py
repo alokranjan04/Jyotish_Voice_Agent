@@ -13,7 +13,7 @@ from aiohttp import web
 import aiohttp
 from datetime import datetime
 from dotenv import load_dotenv
-from email_utils import send_astrology_report
+from email_utils import send_astrology_report, send_transcript_email
 
 load_dotenv()
 
@@ -278,6 +278,12 @@ async def vobiz_handler(request):
                                     state["dob"], state["tob"], state["pob"],
                                     "<p>Call ended before report was generated.</p>",
                                     state["planets"], full_text)
+
+        # ALWAYS send the full conversation transcript as a separate email after call ends
+        if state["captured_email"] and state["transcript"]:
+            print(f"--- [POST-CALL]: Sending conversation transcript to {state['captured_email']} ---")
+            await asyncio.to_thread(send_transcript_email, state["captured_email"], state["user_name"], state["transcript"])
+
         if not ws.closed: await ws.close()
     return ws
 

@@ -272,3 +272,62 @@ def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets=
     except Exception as e:
         print(f"[ERROR] Failed to send email: {e}")
         return False
+
+
+def send_transcript_email(to_email: str, name: str, transcript_lines: list) -> bool:
+    """Send the full conversation transcript as a separate email after the call ends."""
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_password = os.getenv("GMAIL_APP_PASSWORD")
+    if not gmail_user or not gmail_password:
+        print("[ERROR] Email credentials not found for transcript email.")
+        return False
+    if not transcript_lines:
+        print("[WARN] Transcript is empty — skipping transcript email.")
+        return False
+
+    formatted = format_transcript_html("<br>".join(transcript_lines))
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600&family=Cinzel:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body style="background:#0a0c12;margin:0;padding:20px;font-family:Georgia,serif;">
+  <div style="max-width:680px;margin:0 auto;">
+
+    <div style="border:1px solid #92400e;border-radius:6px;overflow:hidden;background:#111318;">
+      <div style="background:#1a1c24;padding:28px 20px;text-align:center;border-bottom:2px solid #d97706;">
+        <div style="font-family:'Cinzel',Georgia,serif;font-size:22px;color:#fbbf24;letter-spacing:4px;font-weight:bold;margin-bottom:6px;">✦ ज्योतिष मित्र ✦</div>
+        <div style="color:#fbbf24;opacity:0.6;font-size:11px;letter-spacing:3px;text-transform:uppercase;font-family:Arial,sans-serif;">वार्तालाप इतिहास — {name} Ji</div>
+      </div>
+
+      <div style="padding:24px;">
+        <h2 style="color:#fbbf24;font-size:14px;letter-spacing:1px;padding-left:12px;border-left:4px solid #d97706;margin:0 0 20px;font-family:Arial,sans-serif;">💬 पूरी बातचीत</h2>
+        {formatted}
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#ffffff20;font-size:10px;padding:16px;">
+      Jyotish Mitra — Vedic Intelligence System v2.5
+    </div>
+  </div>
+</body>
+</html>"""
+
+    msg = MIMEMultipart()
+    msg['From'] = f"ज्योतिष मित्र 🔮 <{gmail_user}>"
+    msg['To'] = to_email
+    msg['Subject'] = f"💬 {name} Ji — Aapki Poori Baatcheet | ज्योतिष मित्र"
+    msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+
+    try:
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(gmail_user, gmail_password)
+        server.send_message(msg)
+        server.quit()
+        print(f"[SUCCESS] Transcript email sent to {to_email}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to send transcript email: {e}")
+        return False
