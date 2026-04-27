@@ -1,15 +1,12 @@
 import smtplib
 import os
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 
 def build_kundali_table(planets_str: str) -> str:
-    """Build a South Indian 4x4 Kundali chart from a planet positions string.
-
-    planets_str format: "Sun=X,Moon=X,Mars=X,Mercury=X,Jupiter=X,Venus=X,Saturn=X,Rahu=X,Ketu=X"
-    where X is a house number 1-12.
-    """
+    """Build a South Indian 4x4 Kundali chart from a planet positions string."""
     planet_colors = {
         'Sun': '#f97316', 'Moon': '#93c5fd', 'Mars': '#ef4444',
         'Mercury': '#22c55e', 'Jupiter': '#fbbf24', 'Venus': '#e879f9',
@@ -21,7 +18,6 @@ def build_kundali_table(planets_str: str) -> str:
         'Saturn': 'शनि', 'Rahu': 'राहु', 'Ketu': 'केतु',
     }
 
-    # Parse planet positions into house buckets
     house_contents: dict[int, list[str]] = {}
     for part in planets_str.split(','):
         part = part.strip()
@@ -40,7 +36,6 @@ def build_kundali_table(planets_str: str) -> str:
                 f'<span style="color:{color};font-weight:bold;font-size:11px;">{name}</span>'
             )
 
-    # South Indian 4x4 grid layout (0 = centre cells)
     grid = [
         [12, 1,  2, 3],
         [11,  0,  0, 4],
@@ -76,8 +71,101 @@ def build_kundali_table(planets_str: str) -> str:
     return html
 
 
+def generate_detailed_analysis(name: str, dob: str, tob: str, pob: str) -> str:
+    """Call Gemini REST API to generate a detailed 1500-word Kundali report in Hindi HTML."""
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        print("[WARN] GEMINI_API_KEY not set — skipping Gemini report generation.")
+        return ""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+
+    h2_style = "color:#fbbf24;font-size:15px;margin:24px 0 8px;padding:7px 0 7px 14px;border-left:3px solid #d97706;background:rgba(217,119,6,0.06);"
+    p_style = "color:#d1d5db;line-height:1.85;margin:5px 0;font-size:13px;"
+
+    prompt = f"""You are an expert Vedic astrologer. Generate a comprehensive, academic Kundali report.
+
+Birth details:
+Name: {name}
+Date of Birth: {dob}
+Time of Birth: {tob}
+Place of Birth: {pob}
+
+Write a detailed 1500+ word Kundali report entirely in Hindi (Devanagari script) formatted as HTML.
+Use EXACTLY this structure — each section must be thorough and specific to the birth data:
+
+<h2 style="{h2_style}">१. व्यक्तित्व एवं स्वभाव</h2>
+<p style="{p_style}">[200+ words: Lagna, Rashi, Nakshatra, Ascendant Lord's placement — deep personality analysis]</p>
+
+<h2 style="{h2_style}">२. करियर एवं आर्थिक स्थिति</h2>
+<p style="{p_style}">[250+ words: 10th house, 2nd house, 11th house, specific Raj Yogas — career prediction with timing]</p>
+
+<h2 style="{h2_style}">३. पारिवारिक जीवन एवं विवाह</h2>
+<p style="{p_style}">[200+ words: 7th house, 4th house, Venus and Jupiter placement — marriage timing and family analysis]</p>
+
+<h2 style="{h2_style}">४. स्वास्थ्य एवं शारीरिक स्थिति</h2>
+<p style="{p_style}">[150+ words: 6th house, 8th house, Moon sign health indicators and precautions]</p>
+
+<h2 style="{h2_style}">५. विशेष राजयोग एवं दोष</h2>
+<p style="{p_style}">[200+ words: All significant Yogas — Gajakesari, Bhadra, Neech Bhang etc. and Doshas — Mangal, Shani Sade Sati etc.]</p>
+
+<h2 style="{h2_style}">६. दशा एवं भविष्यफल</h2>
+<p style="{p_style}">[200+ words: Current Mahadasha and Antardasha lord, specific predictions for 1 year ahead, 3 years ahead, and 5 years ahead with approximate timing]</p>
+
+<h2 style="{h2_style}">७. ज्योतिषीय उपाय</h2>
+<p style="{p_style}">[150+ words: 6-7 specific remedies — include exact mantra text, gemstone with wearing instructions, day/time for rituals, and charitable acts]</p>
+
+IMPORTANT: Be specific to this person's birth data. Do not give generic answers. Make each section academically detailed."""
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 4096}
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=90)
+        data = response.json()
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        print(f"[INFO] Gemini generated {len(text)} chars of Kundali analysis.")
+        return text
+    except Exception as e:
+        print(f"[ERROR] Gemini report generation failed: {e}")
+        return ""
+
+
+def format_transcript_html(transcript: str) -> str:
+    """Format raw transcript string into styled HTML with alternating bubbles."""
+    if not transcript:
+        return ""
+    lines = transcript.split("<br>") if "<br>" in transcript else transcript.split("\n")
+    html = ""
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("User:"):
+            text = line[5:].strip()
+            html += (
+                f'<div style="margin:6px 0;padding:8px 12px;background:#1a2235;'
+                f'border-left:3px solid #fbbf24;border-radius:3px;">'
+                f'<span style="color:#fbbf24;font-size:10px;font-weight:bold;letter-spacing:1px;">आप</span>'
+                f'<br><span style="color:#e2e8f0;font-size:12px;line-height:1.6;">{text}</span></div>'
+            )
+        elif line.startswith("Jyotish Mitra:"):
+            text = line[14:].strip()
+            html += (
+                f'<div style="margin:6px 0;padding:8px 12px;background:#111318;'
+                f'border-left:3px solid #d97706;border-radius:3px;">'
+                f'<span style="color:#d97706;font-size:10px;font-weight:bold;letter-spacing:1px;">ज्योतिष मित्र</span>'
+                f'<br><span style="color:#d1d5db;font-size:12px;line-height:1.6;">{text}</span></div>'
+            )
+        else:
+            html += f'<div style="margin:3px 0;color:#888;font-size:11px;">{line}</div>'
+    return html
+
+
 def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets="", transcript=""):
-    """Sends the premium dark/gold Kundali HTML report via Gmail SMTP."""
+    """Send the full premium Kundali report — detailed analysis + chart + transcript."""
     gmail_user = os.getenv("GMAIL_USER")
     gmail_password = os.getenv("GMAIL_APP_PASSWORD")
 
@@ -85,63 +173,90 @@ def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets=
         print("[ERROR] Email credentials not found.")
         return False
 
-    # Build the Kundali chart from planet positions; fall back to a blank grid message
-    if planets:
-        kundali_chart_html = build_kundali_table(planets)
-    else:
-        kundali_chart_html = '<p style="color:#d97706;font-size:12px;">Chart data unavailable</p>'
+    # Generate detailed Kundali via Gemini text API (much richer than live voice output)
+    print(f"[INFO] Generating detailed Kundali for {name} ({dob}, {tob}, {pob})...")
+    detailed_analysis = generate_detailed_analysis(name, dob, tob, pob)
+    if not detailed_analysis:
+        print("[WARN] Gemini generation failed — using live session analysis_html as fallback.")
+        detailed_analysis = analysis_html
 
-    html_content = f"""
-    <div style="background:#0a0c12;margin:0;padding:20px;font-family:Georgia,serif">
-      <div style="max-width:660px;margin:0 auto">
-        <div style="margin-bottom:40px;border:1px solid #92400e;border-radius:6px;overflow:hidden;background:#111318">
+    # Build Kundali chart
+    kundali_chart_html = build_kundali_table(planets) if planets else (
+        '<p style="color:#d97706;font-size:12px;text-align:center;">Chart data unavailable</p>'
+    )
 
-          <div style="background-color:#1a1c24;padding:35px 20px;text-align:center;border-bottom:2px solid #d97706">
-            <div style="font-family:'Cinzel',Georgia,serif;font-size:26px;color:#fbbf24;letter-spacing:4px;margin-bottom:8px;font-weight:bold">✦ ज्योतिष मित्र ✦</div>
-            <div style="color:#fbbf24;opacity:0.6;font-size:11px;letter-spacing:3px;text-transform:uppercase;font-family:Arial,sans-serif">वैदिक ज्योतिष — रिपोर्ट</div>
-          </div>
+    # Format transcript section
+    transcript_section = ""
+    if transcript:
+        formatted = format_transcript_html(transcript)
+        transcript_section = f"""
+    <div style="margin-bottom:30px;border:1px solid #92400e;border-radius:6px;overflow:hidden;background:#111318;">
+      <div style="background:#1a1c24;padding:18px 25px;border-bottom:1px solid #d97706;">
+        <h2 style="color:#fbbf24;font-size:13px;letter-spacing:1px;margin:0;font-family:Arial,sans-serif;">
+          💬 वार्तालाप इतिहास — पूरी बातचीत
+        </h2>
+      </div>
+      <div style="padding:16px 20px;">
+        {formatted}
+      </div>
+    </div>"""
 
-          <div style="padding:25px;border-bottom:1px solid #2d303a;background-color:#12141c">
-            <h2 style="color:#fbbf24;font-size:14px;letter-spacing:1px;padding-left:12px;border-left:4px solid #d97706;margin:0 0 15px;font-family:Arial,sans-serif">📋 जन्म विवरण</h2>
-            <table style="width:100%;border-collapse:collapse;color:#e2e8f0;font-size:13px;font-family:Arial,sans-serif">
-              <tbody>
-                <tr style="border-bottom:1px solid #ffffff05"><td style="color:#d97706;font-weight:bold;padding:8px 0;width:140px">नाम</td><td style="padding:8px 0">{name}</td></tr>
-                <tr style="border-bottom:1px solid #ffffff05"><td style="color:#d97706;font-weight:bold;padding:8px 0">जन्म तिथि</td><td style="padding:8px 0">{dob}</td></tr>
-                <tr style="border-bottom:1px solid #ffffff05"><td style="color:#d97706;font-weight:bold;padding:8px 0">जन्म समय</td><td style="padding:8px 0">{tob}</td></tr>
-                <tr><td style="color:#d97706;font-weight:bold;padding:8px 0">जन्म स्थान</td><td style="padding:8px 0">{pob}</td></tr>
-              </tbody>
-            </table>
-          </div>
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="background:#0a0c12;margin:0;padding:20px;font-family:Georgia,serif;">
+  <div style="max-width:680px;margin:0 auto;">
 
-          <div style="padding:20px 25px;border-bottom:1px solid #ffffff10;text-align:center;background:#0c0e14">
-            <h2 style="color:#fbbf24;font-size:13px;letter-spacing:2px;padding-left:10px;border-left:3px solid #d97706;margin:0 0 14px;text-align:left">🌐 जन्म कुंडली चक्र</h2>
-            <div style="display:inline-block;background:#080a0f;border:1px solid #d97706;padding:10px;border-radius:4px">
-              {kundali_chart_html}
-            </div>
-          </div>
+    <!-- Header -->
+    <div style="margin-bottom:30px;border:1px solid #92400e;border-radius:6px;overflow:hidden;background:#111318;">
+      <div style="background:#1a1c24;padding:35px 20px;text-align:center;border-bottom:2px solid #d97706;">
+        <div style="font-family:'Cinzel',Georgia,serif;font-size:26px;color:#fbbf24;letter-spacing:4px;font-weight:bold;margin-bottom:6px;">✦ ज्योतिष मित्र ✦</div>
+        <div style="color:#fbbf24;opacity:0.6;font-size:11px;letter-spacing:3px;text-transform:uppercase;font-family:Arial,sans-serif;">वैदिक ज्योतिष — विस्तृत कुंडली रिपोर्ट</div>
+      </div>
 
-          <div style="padding:25px">
-            <h2 style="color:#fbbf24;font-size:14px;letter-spacing:1px;padding-left:12px;border-left:4px solid #d97706;margin:0 0 18px;font-family:Arial,sans-serif">🔮 कुंडली विश्लेषण</h2>
-            <div style="font-family:Arial,sans-serif;color:#d1d5db">
-              {analysis_html}
-            </div>
-          </div>
+      <!-- Birth Details -->
+      <div style="padding:25px;border-bottom:1px solid #2d303a;background:#12141c;">
+        <h2 style="color:#fbbf24;font-size:13px;letter-spacing:1px;padding-left:12px;border-left:4px solid #d97706;margin:0 0 15px;font-family:Arial,sans-serif;">📋 जन्म विवरण</h2>
+        <table style="width:100%;border-collapse:collapse;color:#e2e8f0;font-size:13px;font-family:Arial,sans-serif;">
+          <tr style="border-bottom:1px solid #ffffff08;"><td style="color:#d97706;font-weight:bold;padding:8px 0;width:140px;">नाम</td><td style="padding:8px 0;">{name}</td></tr>
+          <tr style="border-bottom:1px solid #ffffff08;"><td style="color:#d97706;font-weight:bold;padding:8px 0;">जन्म तिथि</td><td style="padding:8px 0;">{dob}</td></tr>
+          <tr style="border-bottom:1px solid #ffffff08;"><td style="color:#d97706;font-weight:bold;padding:8px 0;">जन्म समय</td><td style="padding:8px 0;">{tob}</td></tr>
+          <tr><td style="color:#d97706;font-weight:bold;padding:8px 0;">जन्म स्थान</td><td style="padding:8px 0;">{pob}</td></tr>
+        </table>
+      </div>
 
+      <!-- Kundali Chart -->
+      <div style="padding:20px 25px;border-bottom:1px solid #ffffff10;text-align:center;background:#0c0e14;">
+        <h2 style="color:#fbbf24;font-size:13px;letter-spacing:2px;padding-left:10px;border-left:3px solid #d97706;margin:0 0 14px;text-align:left;font-family:Arial,sans-serif;">🌐 जन्म कुंडली चक्र</h2>
+        <div style="display:inline-block;background:#080a0f;border:1px solid #d97706;padding:10px;border-radius:4px;">
+          {kundali_chart_html}
         </div>
+      </div>
 
-        {f'<div style="padding:20px;border:1px solid #92400e;border-radius:4px;background:#111318;margin-bottom:20px"><h2 style="color:#fbbf24;font-size:13px;padding-left:10px;border-left:3px solid #d97706;margin:0 0 12px;font-family:Arial,sans-serif">💬 वार्तालाप इतिहास</h2><div style="color:#d1d5db;font-size:12px;line-height:1.8;font-family:Arial,sans-serif">{transcript}</div></div>' if transcript else ""}
-
-        <div style="text-align:center;color:#ffffff20;font-size:10px;padding:20px">
-          Jyotish Mitra — Vedic Intelligence System v2.5
+      <!-- Detailed Analysis -->
+      <div style="padding:25px;">
+        <h2 style="color:#fbbf24;font-size:13px;letter-spacing:1px;padding-left:12px;border-left:4px solid #d97706;margin:0 0 18px;font-family:Arial,sans-serif;">🔮 विस्तृत कुंडली विश्लेषण</h2>
+        <div style="font-family:Arial,sans-serif;">
+          {detailed_analysis}
         </div>
       </div>
     </div>
-    """
+
+    <!-- Conversation Transcript -->
+    {transcript_section}
+
+    <div style="text-align:center;color:#ffffff20;font-size:10px;padding:16px;">
+      Jyotish Mitra — Vedic Intelligence System v2.5
+    </div>
+
+  </div>
+</body>
+</html>"""
 
     msg = MIMEMultipart()
     msg['From'] = f"ज्योतिष मित्र 🔮 <{gmail_user}>"
     msg['To'] = to_email
-    msg['Subject'] = f"✦ {name} Ji — Aapki Kundali Report | ज्योतिष मित्र"
+    msg['Subject'] = f"✦ {name} Ji — Aapki Vistar Kundali Report | ज्योतिष मित्र"
     msg.attach(MIMEText(html_content, 'html', 'utf-8'))
 
     try:
@@ -149,7 +264,7 @@ def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets=
         server.login(gmail_user, gmail_password)
         server.send_message(msg)
         server.quit()
-        print(f"[SUCCESS] Kundali report sent to {to_email}")
+        print(f"[SUCCESS] Full Kundali report sent to {to_email}")
         return True
     except Exception as e:
         print(f"[ERROR] Failed to send email: {e}")

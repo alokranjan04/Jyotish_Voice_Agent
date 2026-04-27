@@ -68,15 +68,18 @@ async def vobiz_handler(request):
     await ws.prepare(request)
     print(f"--- [BRIDGE]: Connected to Caller {caller_id} ---")
     
-    state = {"last_ai_audio_time": 0, "transcript": [], "captured_email": None, "user_name": "User", "greeted": False, "dob": "N/A", "tob": "N/A", "pob": "N/A"}
+    state = {"transcript": [], "captured_email": None, "user_name": "User", "greeted": False,
+             "dob": "N/A", "tob": "N/A", "pob": "N/A", "planets": "", "last_topic": "", "report_sent": False}
     memory = load_user_memory()
     user_data = memory.get(caller_id)
-    if user_data: 
+    if user_data:
         state["captured_email"] = user_data.get("email")
-        state["user_name"] = user_data.get("name")
+        state["user_name"] = user_data.get("name", "User")
         state["dob"] = user_data.get("dob", "N/A")
         state["tob"] = user_data.get("tob", "N/A")
         state["pob"] = user_data.get("pob", "N/A")
+        state["planets"] = user_data.get("planets", "")
+        state["last_topic"] = user_data.get("last_topic", "")
     
     try:
         while not ws.closed:
@@ -85,7 +88,20 @@ async def vobiz_handler(request):
                     current_date_str = datetime.now().strftime("%A, %B %d, %Y")
                     memory_context = ""
                     if user_data:
-                        memory_context = f"\n\nRETURNING USER DETECTED:\nName: {user_data.get('name')}\nDOB: {user_data.get('dob')}\nTOB: {user_data.get('tob')}\nPOB: {user_data.get('pob')}\nEmail: {user_data.get('email')}"
+                        call_count = user_data.get("call_count", 1)
+                        memory_context = f"\n\nRETURNING USER — Call #{call_count}:"
+                        memory_context += f"\nName: {user_data.get('name')}"
+                        memory_context += f"\nDOB: {user_data.get('dob')}, TOB: {user_data.get('tob')}, POB: {user_data.get('pob')}"
+                        memory_context += f"\nEmail: {user_data.get('email')}"
+                        if user_data.get("last_topic"):
+                            memory_context += f"\nLast Topic Discussed: {user_data.get('last_topic')}"
+                        if user_data.get("last_call_date"):
+                            memory_context += f"\nLast Call Date: {user_data.get('last_call_date')}"
+                        if user_data.get("conversation_summary"):
+                            memory_context += f"\nPrevious Session Summary: {user_data.get('conversation_summary')}"
+                        if user_data.get("planets"):
+                            memory_context += f"\nKundali Planets: {user_data.get('planets')}"
+                        memory_context += "\nIMPORTANT: You already have their full kundali. Do NOT ask for birth details again. Greet them by name and reference their last topic."
                     
                     dynamic_prompt = f"{SYSTEM_PROMPT}{memory_context}\n\nCaller: {caller_id}. Today: {current_date_str}."
                     
@@ -109,10 +125,19 @@ async def vobiz_handler(request):
                         },
                         {
                             "name": "save_user_profile",
-                            "description": "Saves user profile.",
+                            "description": "Saves user profile and session memory. Call this at the END of every conversation.",
                             "parameters": {
                                 "type": "object",
-                                "properties": {"name": {"type": "string"}, "dob": {"type": "string"}, "tob": {"type": "string"}, "pob": {"type": "string"}, "email": {"type": "string"}},
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "dob": {"type": "string"},
+                                    "tob": {"type": "string"},
+                                    "pob": {"type": "string"},
+                                    "email": {"type": "string"},
+                                    "last_topic": {"type": "string", "description": "Main concern discussed: Career / Paise / Love / Health / General"},
+                                    "planets": {"type": "string", "description": "Planet positions string used in the report. Same format as send_astrology_report."},
+                                    "conversation_summary": {"type": "string", "description": "2-3 sentence summary of the key insights and predictions given in this session."}
+                                },
                                 "required": ["name", "dob", "tob", "pob", "email"]
                             }
                         }]
@@ -134,7 +159,16 @@ async def vobiz_handler(request):
                     await gemini_ws.recv()
                     
                     if not state["greeted"]:
-                        trigger = "Greet the returning user." if user_data else "Start the new session."
+                        if user_data:
+                            name = user_data.get("name", "")
+                            last_topic = user_data.get("last_topic", "")
+                            greeting = f"Namashkar {name} ji! Aapki kundali mere paas hai jo maine pichli baar banai thi."
+                            if last_topic:
+                                greeting += f" Mujhe yaad hai ki aapne {last_topic} ke baare mein poocha tha."
+                            greeting += " Aaj main aapko kis tarah madad kar sakti hoon?"
+                            trigger = f"Say this greeting exactly in Hinglish: '{greeting}'"
+                        else:
+                            trigger = "Start the new session with the opening greeting."
                         await gemini_ws.send(json.dumps({"realtimeInput": {"text": trigger}}))
                         state["greeted"] = True
 
@@ -171,12 +205,20 @@ async def vobiz_handler(request):
                                             state["captured_email"] = args['to_email']
                                             state["user_name"] = args['name']
                                             state["dob"], state["tob"], state["pob"] = args['dob'], args['tob'], args['pob']
-                                            asyncio.create_task(asyncio.to_thread(send_astrology_report, args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args.get('planets', '')))
+                                            state["planets"] = args.get('planets', '')
+                                            state["report_sent"] = True
+                                            full_transcript = "<br>".join(state["transcript"])
+                                            asyncio.create_task(asyncio.to_thread(send_astrology_report, args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args.get('planets', ''), full_transcript))
                                             await gemini_ws.send(json.dumps({"toolResponse": {"functionResponses": [{"name": "send_astrology_report", "id": call["id"], "response": {"result": "Success"}}]}}))
                                         elif call["name"] == "save_user_profile":
                                             args = call["args"]
-                                            memory[caller_id] = args
+                                            existing = memory.get(caller_id, {})
+                                            args["last_call_date"] = datetime.now().strftime("%d %B %Y")
+                                            args["call_count"] = existing.get("call_count", 0) + 1
+                                            memory[caller_id] = {**existing, **args}
                                             save_user_memory(memory)
+                                            state["last_topic"] = args.get("last_topic", state["last_topic"])
+                                            if args.get("planets"): state["planets"] = args["planets"]
                                             await gemini_ws.send(json.dumps({"toolResponse": {"functionResponses": [{"name": "save_user_profile", "id": call["id"], "response": {"result": "Saved"}}]}}))
                                 server_content = resp.get("serverContent")
                                 if server_content:
@@ -208,12 +250,27 @@ async def vobiz_handler(request):
             except Exception: await asyncio.sleep(1)
     except Exception: traceback.print_exc()
     finally:
-        # ENSURE Transcript is sent before closing
-        if state["captured_email"] and len(state["transcript"]) > 2:
+        # Auto-save whatever we captured in case save_user_profile was never called
+        if state["user_name"] != "User" and state["dob"] != "N/A":
+            existing = memory.get(caller_id, {})
+            auto = {"name": state["user_name"], "dob": state["dob"], "tob": state["tob"],
+                    "pob": state["pob"], "last_call_date": datetime.now().strftime("%d %B %Y"),
+                    "call_count": existing.get("call_count", 0) + 1}
+            if state["captured_email"]: auto["email"] = state["captured_email"]
+            if state["planets"]: auto["planets"] = state["planets"]
+            if state["last_topic"]: auto["last_topic"] = state["last_topic"]
+            memory[caller_id] = {**existing, **auto}
+            save_user_memory(memory)
+            print(f"--- [POST-CALL]: Memory auto-saved for {state['user_name']} ---")
+
+        # Send transcript-only email if report was never triggered during the call
+        if state["captured_email"] and len(state["transcript"]) > 2 and not state.get("report_sent"):
             print(f"--- [POST-CALL]: Sending transcript to {state['captured_email']} ---")
             full_text = "<br>".join(state["transcript"])
-            # USE AWAIT here to ensure it finishes before the coroutine exits
-            await asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"], state["dob"], state["tob"], state["pob"], "<p>See transcript below.</p>", "", full_text)
+            await asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"],
+                                    state["dob"], state["tob"], state["pob"],
+                                    "<p>Call ended before report was generated.</p>",
+                                    state["planets"], full_text)
         if not ws.closed: await ws.close()
     return ws
 
