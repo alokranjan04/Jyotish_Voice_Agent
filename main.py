@@ -92,15 +92,19 @@ async def vobiz_handler(request):
                     TOOLS = [{
                         "function_declarations": [{
                             "name": "send_astrology_report",
-                            "description": "Sends the premium HTML report.",
+                            "description": "Sends the premium Kundali HTML report to the user's email. Call this after the user confirms their email and you have completed the astrological analysis.",
                             "parameters": {
                                 "type": "object",
                                 "properties": {
-                                    "to_email": {"type": "string"}, "name": {"type": "string"},
-                                    "dob": {"type": "string"}, "tob": {"type": "string"}, "pob": {"type": "string"},
-                                    "analysis_html": {"type": "string"}, "birth_chart_html": {"type": "string"}
+                                    "to_email": {"type": "string", "description": "User's email address"},
+                                    "name": {"type": "string", "description": "User's full name"},
+                                    "dob": {"type": "string", "description": "Date of birth"},
+                                    "tob": {"type": "string", "description": "Time of birth"},
+                                    "pob": {"type": "string", "description": "Place of birth"},
+                                    "planets": {"type": "string", "description": "Planet house positions calculated from birth details. Format: Sun=X,Moon=X,Mars=X,Mercury=X,Jupiter=X,Venus=X,Saturn=X,Rahu=X,Ketu=X where X is house number 1-12"},
+                                    "analysis_html": {"type": "string", "description": "Full Hindi Kundali analysis in HTML with h2 headings for each section"}
                                 },
-                                "required": ["to_email", "name", "dob", "tob", "pob", "analysis_html", "birth_chart_html"]
+                                "required": ["to_email", "name", "dob", "tob", "pob", "planets", "analysis_html"]
                             }
                         },
                         {
@@ -167,7 +171,7 @@ async def vobiz_handler(request):
                                             state["captured_email"] = args['to_email']
                                             state["user_name"] = args['name']
                                             state["dob"], state["tob"], state["pob"] = args['dob'], args['tob'], args['pob']
-                                            asyncio.create_task(asyncio.to_thread(send_astrology_report, args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args['birth_chart_html']))
+                                            asyncio.create_task(asyncio.to_thread(send_astrology_report, args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args.get('planets', '')))
                                             await gemini_ws.send(json.dumps({"toolResponse": {"functionResponses": [{"name": "send_astrology_report", "id": call["id"], "response": {"result": "Success"}}]}}))
                                         elif call["name"] == "save_user_profile":
                                             args = call["args"]
@@ -176,8 +180,11 @@ async def vobiz_handler(request):
                                             await gemini_ws.send(json.dumps({"toolResponse": {"functionResponses": [{"name": "save_user_profile", "id": call["id"], "response": {"result": "Saved"}}]}}))
                                 server_content = resp.get("serverContent")
                                 if server_content:
+                                    # Barge-in: Gemini detected user interrupted mid-response
+                                    if server_content.get("interrupted") and stream_sid:
+                                        await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
                                     user_trans = server_content.get("inputAudioTranscription", {}).get("text")
-                                    if user_trans: 
+                                    if user_trans:
                                         if stream_sid: await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
                                         state["transcript"].append(f"User: {user_trans}")
                                     ai_trans = server_content.get("outputAudioTranscription", {}).get("text")
@@ -206,7 +213,7 @@ async def vobiz_handler(request):
             print(f"--- [POST-CALL]: Sending transcript to {state['captured_email']} ---")
             full_text = "<br>".join(state["transcript"])
             # USE AWAIT here to ensure it finishes before the coroutine exits
-            await asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"], state["dob"], state["tob"], state["pob"], f"<h3>Full Conversation Transcript</h3><p>{full_text}</p>", "<!-- No Chart -->")
+            await asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"], state["dob"], state["tob"], state["pob"], "<p>See transcript below.</p>", "", full_text)
         if not ws.closed: await ws.close()
     return ws
 
