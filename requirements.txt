@@ -2,4 +2,4 @@ aiohttp
 websockets
 python-dotenv
 requests
-audioop-lts
+audioop-lts; python_version >= "3.13"
