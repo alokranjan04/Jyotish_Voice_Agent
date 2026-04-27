@@ -33,7 +33,7 @@ def build_kundali_table(planets_str: str) -> str:
             color = planet_colors[planet]
             name = planet_names_hi.get(planet, planet)
             house_contents.setdefault(house, []).append(
-                f'<span style="color:{color};font-weight:bold;font-size:11px;">{name}</span>'
+                f'<span style="color:{color};font-weight:bold;font-size:14px;display:block;line-height:1.4;">{name}</span>'
             )
 
     grid = [
@@ -44,8 +44,8 @@ def build_kundali_table(planets_str: str) -> str:
     ]
 
     html = (
-        '<table border="0" cellpadding="0" cellspacing="4" '
-        'style="background:#080a0f;border:1px solid #d97706;margin:0 auto;font-family:Arial,sans-serif;">'
+        '<table border="0" cellpadding="0" cellspacing="3" '
+        'style="background:#080a0f;border:2px solid #d97706;margin:0 auto;font-family:Arial,sans-serif;">'
     )
     for r, row in enumerate(grid):
         html += '<tr>'
@@ -54,17 +54,17 @@ def build_kundali_table(planets_str: str) -> str:
                 if r == 1 and c == 1:
                     html += (
                         '<td colspan="2" rowspan="2" style="background:#0c0e14;text-align:center;'
-                        'color:#d97706;font-size:10px;border:1px solid #ffffff05;">'
-                        '<div style="font-size:18px;margin-bottom:4px;">✦</div>'
-                        'जन्म कुंडली</td>'
+                        'color:#d97706;font-size:13px;font-weight:bold;border:1px solid #d97706;">'
+                        '<div style="font-size:22px;margin-bottom:6px;">✦</div>'
+                        'जन्म<br>कुंडली</td>'
                     )
                 continue
-            planets_html = '<br>'.join(house_contents.get(house_num, []))
+            planets_html = ''.join(house_contents.get(house_num, []))
             html += (
-                f'<td style="width:75px;height:75px;background:#111318;border:1px solid #92400e;'
-                f'text-align:center;vertical-align:middle;padding:4px;">'
-                f'<div style="color:#ffffff20;font-size:9px;margin-bottom:2px;">{house_num}</div>'
-                f'<div style="line-height:1.3;">{planets_html}</div></td>'
+                f'<td style="width:100px;height:100px;background:#111318;border:2px solid #92400e;'
+                f'text-align:center;vertical-align:middle;padding:6px;">'
+                f'<div style="color:#ffffff;font-size:10px;margin-bottom:4px;opacity:0.5;">{house_num}</div>'
+                f'<div style="line-height:1.5;">{planets_html}</div></td>'
             )
         html += '</tr>'
     html += '</table>'
@@ -80,8 +80,8 @@ def generate_detailed_analysis(name: str, dob: str, tob: str, pob: str) -> str:
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
 
-    h2_style = "color:#fbbf24;font-size:15px;margin:24px 0 8px;padding:7px 0 7px 14px;border-left:3px solid #d97706;background:rgba(217,119,6,0.06);"
-    p_style = "color:#d1d5db;line-height:1.85;margin:5px 0;font-size:13px;"
+    h2_style = "color:#fbbf24;font-size:17px;margin:28px 0 10px;padding:9px 0 9px 16px;border-left:4px solid #d97706;background:rgba(217,119,6,0.08);font-family:Arial,sans-serif;"
+    p_style = "color:#ffffff;line-height:2.0;margin:8px 0;font-size:15px;font-family:'Noto Sans Devanagari',Arial,sans-serif;"
 
     prompt = f"""You are an expert Vedic astrologer. Generate a comprehensive, academic Kundali report.
 
@@ -203,7 +203,10 @@ def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets=
 
     html_content = f"""<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"></head>
+<head>
+  <meta charset="utf-8">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
 <body style="background:#0a0c12;margin:0;padding:20px;font-family:Georgia,serif;">
   <div style="max-width:680px;margin:0 auto;">
 
@@ -235,8 +238,8 @@ def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets=
 
       <!-- Detailed Analysis -->
       <div style="padding:25px;">
-        <h2 style="color:#fbbf24;font-size:13px;letter-spacing:1px;padding-left:12px;border-left:4px solid #d97706;margin:0 0 18px;font-family:Arial,sans-serif;">🔮 विस्तृत कुंडली विश्लेषण</h2>
-        <div style="font-family:Arial,sans-serif;">
+        <h2 style="color:#fbbf24;font-size:14px;letter-spacing:1px;padding-left:12px;border-left:4px solid #d97706;margin:0 0 18px;font-family:Arial,sans-serif;">🔮 विस्तृत कुंडली विश्लेषण</h2>
+        <div style="font-family:'Noto Sans Devanagari',Arial,sans-serif;color:#ffffff;font-size:15px;line-height:2.0;">
           {detailed_analysis}
         </div>
       </div>

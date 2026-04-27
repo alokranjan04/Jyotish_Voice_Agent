@@ -147,7 +147,7 @@ async def vobiz_handler(request):
                         "setup": {
                             "model": "models/gemini-3.1-flash-live-preview",
                             "generationConfig": {
-                                "responseModalities": ["AUDIO"],
+                                "responseModalities": ["AUDIO", "TEXT"],
                                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}}
                             },
                             "systemInstruction": {"parts": [{"text": dynamic_prompt}]},
@@ -233,7 +233,10 @@ async def vobiz_handler(request):
                                     if ai_trans: state["transcript"].append(f"Jyotish Mitra: {ai_trans}")
                                     if "modelTurn" in server_content:
                                         for part in server_content["modelTurn"].get("parts", []):
-                                            if "inlineData" in part:
+                                            if "text" in part and part["text"].strip():
+                                                # Capture AI text output for transcript
+                                                state["transcript"].append(f"Jyotish Mitra: {part['text'].strip()}")
+                                            elif "inlineData" in part:
                                                 pcm_24k = base64.b64decode(part["inlineData"]["data"])
                                                 pcm_8k, downsample_state = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, downsample_state)
                                                 mulaw_data = audioop.lin2ulaw(pcm_8k, 2)
