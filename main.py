@@ -147,7 +147,7 @@ async def vobiz_handler(request):
                         "setup": {
                             "model": "models/gemini-3.1-flash-live-preview",
                             "generationConfig": {
-                                "responseModalities": ["AUDIO", "TEXT"],
+                                "responseModalities": ["AUDIO"],
                                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}}
                             },
                             "systemInstruction": {"parts": [{"text": dynamic_prompt}]},
@@ -208,6 +208,10 @@ async def vobiz_handler(request):
                                             state["planets"] = args.get('planets', '')
                                             state["report_sent"] = True
                                             full_transcript = "<br>".join(state["transcript"])
+                                            # Fallback: if real-time transcription didn't capture anything,
+                                            # use the analysis_html summary as conversation context
+                                            if not full_transcript and args.get('analysis_html'):
+                                                full_transcript = f"Jyotish Mitra: {args['analysis_html']}"
                                             asyncio.create_task(asyncio.to_thread(send_astrology_report, args['to_email'], args['name'], args['dob'], args['tob'], args['pob'], args['analysis_html'], args.get('planets', ''), full_transcript))
                                             await gemini_ws.send(json.dumps({"toolResponse": {"functionResponses": [{"name": "send_astrology_report", "id": call["id"], "response": {"result": "Success"}}]}}))
                                         elif call["name"] == "save_user_profile":
