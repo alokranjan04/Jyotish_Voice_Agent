@@ -229,11 +229,11 @@ async def vobiz_handler(request):
                                     # Barge-in: Gemini detected user interrupted mid-response
                                     if server_content.get("interrupted") and stream_sid:
                                         await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
-                                    user_trans = server_content.get("inputAudioTranscription", {}).get("text")
+                                    user_trans = server_content.get("inputTranscription", {}).get("text")
                                     if user_trans:
                                         if stream_sid: await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
                                         state["transcript"].append(f"User: {user_trans}")
-                                    ai_trans = server_content.get("outputAudioTranscription", {}).get("text")
+                                    ai_trans = server_content.get("outputTranscription", {}).get("text")
                                     if ai_trans: state["transcript"].append(f"Jyotish Mitra: {ai_trans}")
                                     if "modelTurn" in server_content:
                                         for part in server_content["modelTurn"].get("parts", []):
@@ -280,8 +280,9 @@ async def vobiz_handler(request):
                                     state["planets"], full_text)
 
         # ALWAYS send the full conversation transcript as a separate email after call ends
-        if state["captured_email"] and state["transcript"]:
-            print(f"--- [POST-CALL]: Sending conversation transcript to {state['captured_email']} ---")
+        # No transcript guard — send even if empty so user always receives it
+        if state["captured_email"]:
+            print(f"--- [POST-CALL]: Sending transcript email to {state['captured_email']} (lines={len(state['transcript'])}) ---")
             await asyncio.to_thread(send_transcript_email, state["captured_email"], state["user_name"], state["transcript"])
 
         if not ws.closed: await ws.close()

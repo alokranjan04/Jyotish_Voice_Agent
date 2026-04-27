@@ -281,11 +281,11 @@ def send_transcript_email(to_email: str, name: str, transcript_lines: list) -> b
     if not gmail_user or not gmail_password:
         print("[ERROR] Email credentials not found for transcript email.")
         return False
-    if not transcript_lines:
-        print("[WARN] Transcript is empty — skipping transcript email.")
-        return False
 
-    formatted = format_transcript_html("<br>".join(transcript_lines))
+    if transcript_lines:
+        formatted = format_transcript_html("<br>".join(transcript_lines))
+    else:
+        formatted = '<p style="color:#888;font-size:13px;font-style:italic;">Is session ki baatcheet capture nahi ho saki. Kundali report alag email mein bhej di gayi hai.</p>'
 
     html_content = f"""<!DOCTYPE html>
 <html>
