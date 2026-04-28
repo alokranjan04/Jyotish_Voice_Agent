@@ -227,19 +227,27 @@ async def vobiz_handler(request):
                                 server_content = resp.get("serverContent")
                                 if server_content:
                                     # Barge-in: Gemini detected user interrupted mid-response
-                                    if server_content.get("interrupted") and stream_sid:
-                                        await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
+                                    if server_content.get("interrupted"):
+                                        if stream_sid: await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
+                                        if state["current_ai_text"].strip():
+                                            state["transcript"].append(f"Jyotish Mitra: {state['current_ai_text'].strip()}...")
+                                            state["current_ai_text"] = ""
+                                            
+                                    if server_content.get("turnComplete"):
+                                        if state["current_ai_text"].strip():
+                                            state["transcript"].append(f"Jyotish Mitra: {state['current_ai_text'].strip()}")
+                                            state["current_ai_text"] = ""
+
                                     user_trans = server_content.get("inputTranscription", {}).get("text")
                                     if user_trans:
                                         if stream_sid: await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
                                         state["transcript"].append(f"User: {user_trans}")
-                                    ai_trans = server_content.get("outputTranscription", {}).get("text")
-                                    if ai_trans: state["transcript"].append(f"Jyotish Mitra: {ai_trans}")
+                                        
                                     if "modelTurn" in server_content:
                                         for part in server_content["modelTurn"].get("parts", []):
                                             if "text" in part and part["text"].strip():
-                                                # Capture AI text output for transcript
-                                                state["transcript"].append(f"Jyotish Mitra: {part['text'].strip()}")
+                                                # Accumulate AI text output instead of appending directly
+                                                state["current_ai_text"] += part["text"]
                                             elif "inlineData" in part:
                                                 pcm_24k = base64.b64decode(part["inlineData"]["data"])
                                                 pcm_8k, downsample_state = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, downsample_state)
@@ -257,6 +265,10 @@ async def vobiz_handler(request):
             except Exception: await asyncio.sleep(1)
     except Exception: traceback.print_exc()
     finally:
+        # Flush any remaining AI text
+        if state.get("current_ai_text", "").strip():
+            state["transcript"].append(f"Jyotish Mitra: {state['current_ai_text'].strip()}")
+
         # Auto-save whatever we captured in case save_user_profile was never called
         if state["user_name"] != "User" and state["dob"] != "N/A":
             existing = memory.get(caller_id, {})
