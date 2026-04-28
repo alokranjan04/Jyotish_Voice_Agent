@@ -315,7 +315,7 @@ def format_transcript_html(transcript: str) -> str:
     return html
 
 
-def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets="", transcript=""):
+def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets="", transcript=""):  # noqa: transcript kept for call-site compatibility
     """Send the full premium Kundali report — detailed analysis + chart + transcript."""
     gmail_user = os.getenv("GMAIL_USER")
     gmail_password = os.getenv("GMAIL_APP_PASSWORD")
@@ -344,22 +344,6 @@ def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets=
     kundali_chart_html = build_kundali_table(planets) if planets else (
         '<p style="color:#d97706;font-size:12px;text-align:center;">Chart data unavailable</p>'
     )
-
-    # Format transcript section
-    transcript_section = ""
-    if transcript:
-        formatted = format_transcript_html(transcript)
-        transcript_section = f"""
-    <div style="margin-bottom:30px;border:1px solid #92400e;border-radius:6px;overflow:hidden;background:#111318;">
-      <div style="background:#1a1c24;padding:18px 25px;border-bottom:1px solid #d97706;">
-        <h2 style="color:#fbbf24;font-size:13px;letter-spacing:1px;margin:0;font-family:Arial,sans-serif;">
-          💬 वार्तालाप इतिहास — पूरी बातचीत
-        </h2>
-      </div>
-      <div style="padding:16px 20px;">
-        {formatted}
-      </div>
-    </div>"""
 
     html_content = f"""<!DOCTYPE html>
 <html>
@@ -404,9 +388,6 @@ def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets=
         </div>
       </div>
     </div>
-
-    <!-- Conversation Transcript -->
-    {transcript_section}
 
     <div style="text-align:center;color:#ffffff20;font-size:10px;padding:16px;">
       Jyotish Mitra — Vedic Intelligence System v2.5
