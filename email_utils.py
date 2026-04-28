@@ -1,8 +1,150 @@
 import smtplib
 import os
+import re
 import requests
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
+RASHI = ['Aries','Taurus','Gemini','Cancer','Leo','Virgo',
+         'Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces']
+
+_CITIES = {
+    "patna":(25.5941,85.1376),"delhi":(28.6139,77.2090),"new delhi":(28.6139,77.2090),
+    "mumbai":(19.0760,72.8777),"bombay":(19.0760,72.8777),
+    "kolkata":(22.5726,88.3639),"calcutta":(22.5726,88.3639),
+    "chennai":(13.0827,80.2707),"madras":(13.0827,80.2707),
+    "bengaluru":(12.9716,77.5946),"bangalore":(12.9716,77.5946),
+    "hyderabad":(17.3850,78.4867),"ahmedabad":(23.0225,72.5714),
+    "pune":(18.5204,73.8567),"surat":(21.1702,72.8311),
+    "jaipur":(26.9124,75.7873),"lucknow":(26.8467,80.9462),
+    "kanpur":(26.4499,80.3319),"nagpur":(21.1458,79.0882),
+    "indore":(22.7196,75.8577),"bhopal":(23.2599,77.4126),
+    "agra":(27.1767,78.0081),"varanasi":(25.3176,82.9739),
+    "kashi":(25.3176,82.9739),"banaras":(25.3176,82.9739),
+    "meerut":(28.9845,77.7064),"rajkot":(22.3039,70.8022),
+    "amritsar":(31.6340,74.8723),"jabalpur":(23.1815,79.9864),
+    "prayagraj":(25.4358,81.8463),"allahabad":(25.4358,81.8463),
+    "ranchi":(23.3441,85.3096),"guwahati":(26.1445,91.7362),
+    "chandigarh":(30.7333,76.7794),"coimbatore":(11.0168,76.9558),
+    "vijayawada":(16.5062,80.6480),"jodhpur":(26.2389,73.0243),
+    "madurai":(9.9252,78.1198),"raipur":(21.2514,81.6296),
+    "kochi":(9.9312,76.2673),"cochin":(9.9312,76.2673),
+    "bhubaneswar":(20.2961,85.8245),"dehradun":(30.3165,78.0322),
+    "panaji":(15.4989,73.8278),"goa":(15.2993,74.1240),
+    "mysore":(12.2958,76.6394),"mysuru":(12.2958,76.6394),
+    "thiruvananthapuram":(8.5241,76.9366),"trivandrum":(8.5241,76.9366),
+    "jammu":(32.7266,74.8570),"srinagar":(34.0837,74.7973),
+    "gorakhpur":(26.7606,83.3732),"bareilly":(28.3670,79.4304),
+    "aligarh":(27.8974,78.0880),"mathura":(27.4924,77.6737),
+    "haridwar":(29.9457,78.1642),"varanasi":(25.3176,82.9739),
+    "muzaffarpur":(26.1209,85.3647),"gaya":(24.7914,84.9994),
+    "bhagalpur":(25.2425,86.9842),"darbhanga":(26.1542,85.8918),
+    "jamshedpur":(22.8046,86.2029),"dhanbad":(23.7957,86.4304),
+    "visakhapatnam":(17.6868,83.2185),"vizag":(17.6868,83.2185),
+    "siliguri":(26.7271,88.3952),"guntur":(16.3067,80.4365),
+    "salem":(11.6643,78.1460),"trichy":(10.7905,78.7047),
+    "puducherry":(11.9416,79.8083),"pondicherry":(11.9416,79.8083),
+    "udaipur":(24.5854,73.7125),"ajmer":(26.4499,74.6399),
+    "ludhiana":(30.9010,75.8573),"jalandhar":(31.3260,75.5762),
+    "gwalior":(26.2183,78.1828),"nashik":(19.9975,73.7898),
+    "mangalore":(12.9141,74.8560),"mangaluru":(12.9141,74.8560),
+}
+
+def _get_coords(place_str: str) -> tuple:
+    key = place_str.lower().strip()
+    for city, coords in _CITIES.items():
+        if city in key or key.startswith(city):
+            return coords
+    print(f"[WARN] City not found: '{place_str}' — defaulting to New Delhi")
+    return (28.6139, 77.2090)
+
+
+def calculate_vedic_planets(dob_str: str, tob_str: str, pob_str: str):
+    """
+    Calculate accurate Vedic planet house positions using Swiss Ephemeris (Lahiri ayanamsha).
+    Returns (planets_str, lagna_name) or (None, None) on failure.
+    """
+    try:
+        import swisseph as swe
+
+        # Parse date
+        date_obj = None
+        for fmt in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                date_obj = datetime.strptime(dob_str.strip(), fmt)
+                break
+            except ValueError:
+                continue
+        if not date_obj:
+            m = re.search(r'(\d{1,2})\s+(\w+)\s+(\d{4})', dob_str)
+            if m:
+                try:
+                    date_obj = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)}", "%d %B %Y")
+                except ValueError:
+                    pass
+        if not date_obj:
+            print(f"[ERROR] Cannot parse DOB: {dob_str}")
+            return None, None
+
+        # Parse time + AM/PM
+        tob_upper = tob_str.strip().upper()
+        is_pm = any(x in tob_upper for x in ("PM", "RAAT", "SHAM", "EVENING"))
+        is_am = any(x in tob_upper for x in ("AM", "SUBAH", "SAVERE", "MORNING"))
+        tm = re.search(r'(\d{1,2})[:\.](\d{2})', tob_upper)
+        if tm:
+            hour, minute = int(tm.group(1)), int(tm.group(2))
+        else:
+            tm = re.search(r'(\d{1,2})', tob_upper)
+            hour, minute = (int(tm.group(1)), 0) if tm else (0, 0)
+        if is_pm and hour != 12:
+            hour += 12
+        elif is_am and hour == 12:
+            hour = 0
+
+        # Convert IST → UTC
+        dt_ist = date_obj.replace(hour=hour, minute=minute, second=0)
+        dt_utc = dt_ist - timedelta(hours=5, minutes=30)
+
+        jd = swe.julday(dt_utc.year, dt_utc.month, dt_utc.day,
+                        dt_utc.hour + dt_utc.minute / 60.0)
+
+        swe.set_sid_mode(swe.SIDM_LAHIRI)
+        ayanamsha = swe.get_ayanamsa(jd)
+
+        lat, lon = _get_coords(pob_str)
+        _, ascmc = swe.houses(jd, lat, lon, b'P')
+        asc_sidereal = (ascmc[0] - ayanamsha) % 360
+        asc_sign = int(asc_sidereal / 30)
+
+        PLANET_IDS = [
+            ('Sun', swe.SUN), ('Moon', swe.MOON), ('Mars', swe.MARS),
+            ('Mercury', swe.MERCURY), ('Jupiter', swe.JUPITER),
+            ('Venus', swe.VENUS), ('Saturn', swe.SATURN),
+        ]
+        result = {}
+        for pname, pid in PLANET_IDS:
+            pos, _ = swe.calc_ut(jd, pid, swe.FLG_SIDEREAL)
+            psign = int(pos[0] / 30)
+            result[pname] = ((psign - asc_sign) % 12) + 1
+
+        rahu_pos, _ = swe.calc_ut(jd, swe.TRUE_NODE, swe.FLG_SIDEREAL)
+        rahu_sign = int(rahu_pos[0] / 30)
+        ketu_sign = int(((rahu_pos[0] + 180) % 360) / 30)
+        result['Rahu'] = ((rahu_sign - asc_sign) % 12) + 1
+        result['Ketu'] = ((ketu_sign - asc_sign) % 12) + 1
+
+        planets_str = ",".join(f"{p}={h}" for p, h in result.items())
+        lagna = RASHI[asc_sign]
+        print(f"[INFO] Vedic chart computed — Lagna: {lagna} | {planets_str}")
+        return planets_str, lagna
+
+    except ImportError:
+        print("[WARN] pyswisseph not installed — planet positions will not be calculated")
+        return None, None
+    except Exception as e:
+        print(f"[ERROR] Chart calculation failed: {e}")
+        return None, None
 
 
 def build_kundali_table(planets_str: str) -> str:
@@ -71,7 +213,8 @@ def build_kundali_table(planets_str: str) -> str:
     return html
 
 
-def generate_detailed_analysis(name: str, dob: str, tob: str, pob: str) -> str:
+def generate_detailed_analysis(name: str, dob: str, tob: str, pob: str,
+                               planets_str: str = "", lagna: str = "") -> str:
     """Call Gemini REST API to generate a detailed 1500-word Kundali report in Hindi HTML."""
     api_key = os.getenv("GEMINI_API_KEY", "")
     if not api_key:
@@ -83,14 +226,22 @@ def generate_detailed_analysis(name: str, dob: str, tob: str, pob: str) -> str:
     h2_style = "color:#fbbf24;font-size:17px;margin:28px 0 10px;padding:9px 0 9px 16px;border-left:4px solid #d97706;background:rgba(217,119,6,0.08);font-family:Arial,sans-serif;"
     p_style = "color:#ffffff;line-height:2.0;margin:8px 0;font-size:15px;font-family:'Noto Sans Devanagari',Arial,sans-serif;"
 
+    chart_context = ""
+    if planets_str and lagna:
+        chart_context = f"""
+
+CALCULATED CHART (Swiss Ephemeris, Lahiri ayanamsha — use these exact positions, do NOT recalculate):
+Lagna (Ascendant): {lagna}
+Planet house positions: {planets_str}
+"""
+
     prompt = f"""You are an expert Vedic astrologer. Generate a comprehensive, academic Kundali report.
 
 Birth details:
 Name: {name}
 Date of Birth: {dob}
 Time of Birth: {tob}
-Place of Birth: {pob}
-
+Place of Birth: {pob}{chart_context}
 Write a detailed 1500+ word Kundali report entirely in Hindi (Devanagari script) formatted as HTML.
 Use EXACTLY this structure — each section must be thorough and specific to the birth data:
 
@@ -173,9 +324,18 @@ def send_astrology_report(to_email, name, dob, tob, pob, analysis_html, planets=
         print("[ERROR] Email credentials not found.")
         return False
 
-    # Generate detailed Kundali via Gemini text API (much richer than live voice output)
-    print(f"[INFO] Generating detailed Kundali for {name} ({dob}, {tob}, {pob})...")
-    detailed_analysis = generate_detailed_analysis(name, dob, tob, pob)
+    # Calculate accurate Vedic chart using Swiss Ephemeris
+    print(f"[INFO] Calculating Vedic chart for {name} ({dob}, {tob}, {pob})...")
+    calc_planets, lagna = calculate_vedic_planets(dob, tob, pob)
+    if calc_planets:
+        planets = calc_planets
+    else:
+        lagna = ""
+        print("[WARN] Chart calculation failed — using Gemini-provided planet positions as fallback.")
+
+    # Generate detailed Kundali via Gemini text API with accurate chart data
+    print(f"[INFO] Generating Kundali analysis...")
+    detailed_analysis = generate_detailed_analysis(name, dob, tob, pob, planets, lagna)
     if not detailed_analysis:
         print("[WARN] Gemini generation failed — using live session analysis_html as fallback.")
         detailed_analysis = analysis_html
