@@ -21,6 +21,9 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_URL = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={GEMINI_API_KEY}"
 MEMORY_FILE = "user_memory.json"
+# Noise gate: audio chunks whose RMS is below this are replaced with silence.
+# Fan/AC noise is typically 100-400 RMS; speech is 800+. Tune via env var.
+NOISE_GATE_RMS = int(os.getenv("NOISE_GATE_RMS", "500"))
 
 def load_app_config():
     try:
@@ -152,6 +155,13 @@ async def vobiz_handler(request):
                             },
                             "systemInstruction": {"parts": [{"text": dynamic_prompt}]},
                             "tools": TOOLS,
+                            "realtimeInputConfig": {
+                                "automaticActivityDetection": {
+                                    "startOfSpeechSensitivity": "START_SENSITIVITY_LOW",
+                                    "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+                                    "silenceDurationMs": 1000
+                                }
+                            },
                             "inputAudioTranscription": {}, "outputAudioTranscription": {}
                         }
                     }
@@ -188,6 +198,10 @@ async def vobiz_handler(request):
                                         if payload:
                                             mulaw_data = base64.b64decode(payload)
                                             pcm_8k = audioop.ulaw2lin(mulaw_data, 2)
+                                            # Noise gate: replace fan/AC hum with silence so Gemini VAD
+                                            # doesn't mistake background noise for speech.
+                                            if audioop.rms(pcm_8k, 2) < NOISE_GATE_RMS:
+                                                pcm_8k = b'\x00' * len(pcm_8k)
                                             pcm_16k, upsample_state = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, upsample_state)
                                             await gemini_ws.send(json.dumps({"realtimeInput": {"audio": {"data": base64.b64encode(pcm_16k).decode("utf-8"), "mimeType": "audio/pcm;rate=16000"}}}))
                                 elif msg.type == aiohttp.WSMsgType.CLOSE: break
