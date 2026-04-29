@@ -23,7 +23,7 @@ GEMINI_URL = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativela
 MEMORY_FILE = "user_memory.json"
 # Noise gate: audio chunks whose RMS is below this are replaced with silence.
 # Fan/AC noise is typically 100-400 RMS; speech is 800+. Tune via env var.
-NOISE_GATE_RMS = int(os.getenv("NOISE_GATE_RMS", "500"))
+NOISE_GATE_RMS = int(os.getenv("NOISE_GATE_RMS", "150"))
 
 def load_app_config():
     try:
@@ -157,9 +157,8 @@ async def vobiz_handler(request):
                             "tools": TOOLS,
                             "realtimeInputConfig": {
                                 "automaticActivityDetection": {
-                                    "startOfSpeechSensitivity": "START_SENSITIVITY_LOW",
-                                    "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-                                    "silenceDurationMs": 1000
+                                    "endOfSpeechSensitivity": "END_SENSITIVITY_HIGH",
+                                    "silenceDurationMs": 600
                                 }
                             },
                             "inputAudioTranscription": {}, "outputAudioTranscription": {}
