@@ -72,7 +72,8 @@ async def vobiz_handler(request):
     print(f"--- [BRIDGE]: Connected to Caller {caller_id} ---")
     
     state = {"transcript": [], "captured_email": None, "user_name": "User", "greeted": False,
-             "dob": "N/A", "tob": "N/A", "pob": "N/A", "planets": "", "last_topic": "", "report_sent": False}
+             "dob": "N/A", "tob": "N/A", "pob": "N/A", "planets": "", "last_topic": "", "report_sent": False,
+             "current_ai_text": ""}
     memory = load_user_memory()
     user_data = memory.get(caller_id)
     if user_data:
@@ -204,7 +205,9 @@ async def vobiz_handler(request):
                                             pcm_16k, upsample_state = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, upsample_state)
                                             await gemini_ws.send(json.dumps({"realtimeInput": {"audio": {"data": base64.b64encode(pcm_16k).decode("utf-8"), "mimeType": "audio/pcm;rate=16000"}}}))
                                 elif msg.type == aiohttp.WSMsgType.CLOSE: break
-                        except Exception: pass
+                        except Exception as e:
+                            print(f"[ERROR] in vobiz_to_ai: {e}")
+                            traceback.print_exc()
 
                     async def ai_to_vobiz():
                         nonlocal downsample_state
@@ -265,7 +268,9 @@ async def vobiz_handler(request):
                                                 pcm_8k, downsample_state = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, downsample_state)
                                                 mulaw_data = audioop.lin2ulaw(pcm_8k, 2)
                                                 if stream_sid: await ws.send_str(json.dumps({"event": "playAudio", "streamId": stream_sid, "media": {"contentType": "audio/x-mulaw", "sampleRate": 8000, "payload": base64.b64encode(mulaw_data).decode("utf-8")}}))
-                        except Exception: pass
+                        except Exception as e:
+                            print(f"[ERROR] in ai_to_vobiz: {e}")
+                            traceback.print_exc()
 
                     downsample_state = None
                     async def heartbeat():
