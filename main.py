@@ -254,7 +254,6 @@ async def vobiz_handler(request):
 
                                     user_trans = server_content.get("inputTranscription", {}).get("text")
                                     if user_trans:
-                                        if stream_sid: await ws.send_str(json.dumps({"event": "clearAudio", "streamId": stream_sid}))
                                         state["transcript"].append(f"User: {user_trans}")
                                         
                                     if "modelTurn" in server_content:
