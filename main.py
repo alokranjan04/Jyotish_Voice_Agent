@@ -316,7 +316,7 @@ async def vobiz_handler(request):
             print(f"--- [POST-CALL]: Memory auto-saved for {state['user_name']} ---")
 
         # Send transcript-only email if report was never triggered during the call
-                    if state["captured_email"] and len(state["transcript"]) >= MIN_TRANSCRIPT_LINES and not state.get("report_sent"):
+        if state["captured_email"] and len(state["transcript"]) >= MIN_TRANSCRIPT_LINES and not state.get("report_sent"):
             print(f"--- [POST-CALL]: Sending transcript to {state['captured_email']} ---")
             full_text = "<br>".join(state["transcript"])
             await asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"],
