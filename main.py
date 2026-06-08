@@ -4,6 +4,7 @@ import json
 import os
 import time
 import websockets
+import logging
 try:
     import audioop
 except ImportError:
@@ -17,10 +18,15 @@ from email_utils import send_astrology_report, send_transcript_email
 
 load_dotenv()
 
+# Basic logging
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(asctime)s %(message)s')
+
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_URL = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={GEMINI_API_KEY}"
 MEMORY_FILE = "user_memory.json"
+# Minimum transcript lines required to trigger a post-call report/transcript send
+MIN_TRANSCRIPT_LINES = int(os.getenv("MIN_TRANSCRIPT_LINES", "1"))
 # Noise gate: audio chunks whose RMS is below this are replaced with silence.
 # Fan/AC noise is typically 100-400 RMS; speech is 800+. Tune via env var.
 NOISE_GATE_RMS = int(os.getenv("NOISE_GATE_RMS", "150"))
@@ -61,15 +67,25 @@ async def handle_answer(request):
         if caller_id.startswith("91") and len(caller_id) > 10: caller_id = caller_id[2:]
         host = request.headers.get("X-Forwarded-Host") or request.host
         ws_url = f"wss://{host}/vobiz-stream?caller_id={caller_id}"
+        logging.info(f"Constructed vobiz WS URL: {ws_url}")
         xml_response = f'<?xml version="1.0" encoding="UTF-8"?><Response><Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">{ws_url}</Stream></Response>'
         return web.Response(text=xml_response, content_type='text/xml')
     except Exception: return web.Response(text="Error", status=500)
 
 async def vobiz_handler(request):
     caller_id = request.query.get("caller_id", "Unknown")
+    # Log incoming request context for diagnostics (helps debug 401 handshake issues)
+    try:
+        logging.info(f"Incoming vobiz connection for caller={caller_id} from={request.remote}")
+        # headers -> convert to plain dict for readable logging
+        hdrs = {k: v for k, v in request.headers.items()}
+        logging.info(f"Request headers: {hdrs}")
+    except Exception:
+        logging.exception("Failed to log request metadata")
+
     ws = web.WebSocketResponse()
     await ws.prepare(request)
-    print(f"--- [BRIDGE]: Connected to Caller {caller_id} ---")
+    logging.info(f"--- [BRIDGE]: Connected to Caller {caller_id} ---")
     
     state = {"transcript": [], "captured_email": None, "user_name": "User", "greeted": False,
              "dob": "N/A", "tob": "N/A", "pob": "N/A", "planets": "", "last_topic": "", "report_sent": False,
@@ -300,7 +316,7 @@ async def vobiz_handler(request):
             print(f"--- [POST-CALL]: Memory auto-saved for {state['user_name']} ---")
 
         # Send transcript-only email if report was never triggered during the call
-        if state["captured_email"] and len(state["transcript"]) > 2 and not state.get("report_sent"):
+                    if state["captured_email"] and len(state["transcript"]) >= MIN_TRANSCRIPT_LINES and not state.get("report_sent"):
             print(f"--- [POST-CALL]: Sending transcript to {state['captured_email']} ---")
             full_text = "<br>".join(state["transcript"])
             await asyncio.to_thread(send_astrology_report, state["captured_email"], state["user_name"],
