@@ -165,7 +165,7 @@ async def vobiz_handler(request):
 
                     setup_msg = {
                         "setup": {
-                            "model": "models/gemini-3.1-flash-live-preview",
+                            "model": "models/gemini-2.0-flash-live-001",
                             "generationConfig": {
                                 "responseModalities": ["AUDIO"],
                                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}}
@@ -182,7 +182,12 @@ async def vobiz_handler(request):
                         }
                     }
                     await gemini_ws.send(json.dumps(setup_msg))
-                    await gemini_ws.recv()
+                    ack = await gemini_ws.recv()
+                    ack_data = json.loads(ack)
+                    if "error" in ack_data:
+                        logging.error(f"[GEMINI SETUP ERROR] {ack_data['error']}")
+                        raise Exception(f"Gemini setup rejected: {ack_data['error']}")
+                    logging.info("[GEMINI] Setup ACK received OK")
                     
                     if not state["greeted"]:
                         if user_data:
@@ -295,7 +300,10 @@ async def vobiz_handler(request):
                             try: await gemini_ws.ping()
                             except: break
                     await asyncio.gather(vobiz_to_ai(), ai_to_vobiz(), heartbeat())
-            except Exception: await asyncio.sleep(1)
+            except Exception as e:
+                logging.error(f"[GEMINI RECONNECT] Connection failed: {e}")
+                traceback.print_exc()
+                await asyncio.sleep(1)
     except Exception: traceback.print_exc()
     finally:
         # Flush any remaining AI text
